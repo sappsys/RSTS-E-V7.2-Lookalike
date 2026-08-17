@@ -1,0 +1,6 @@
+disk/
+*.exe
+*.pdf
+/rsts
+/cmd/rsts/rsts
+/bin/

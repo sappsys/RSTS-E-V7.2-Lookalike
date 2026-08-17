@@ -1,0 +1,285 @@
+package rsts
+
+import (
+	"bufio"
+	"fmt"
+	"os"
+	"path/filepath"
+	"strings"
+	"testing"
+)
+
+func TestUntilLoop(t *testing.T) {
+	out := runProgram(t, "10 I=1\n20 UNTIL I>3\n30 PRINT I\n40 I=I+1\n50 NEXT\n60 END\n")
+	if strings.TrimSpace(out) != "1\n 2\n 3" {
+		t.Fatalf("until: %q", out)
+	}
+}
+
+func TestChange(t *testing.T) {
+	out := runProgram(t, "10 A$=\"HI\"\n20 CHANGE A$ TO A\n30 PRINT A(0); A(1); A(2)\n40 CHANGE A TO B$\n50 PRINT B$\n60 END\n")
+	if !strings.Contains(out, "2") || !strings.Contains(out, "72") || !strings.Contains(out, "73") {
+		t.Fatalf("change nums: %q", out)
+	}
+	if !strings.Contains(out, "HI") {
+		t.Fatalf("change back: %q", out)
+	}
+}
+
+func TestPrintUsing(t *testing.T) {
+	out := strings.TrimSpace(immediate(t, `PRINT USING "###.##", 12.5`))
+	if !strings.Contains(out, "12.50") {
+		t.Fatalf("using: %q", out)
+	}
+	out = strings.TrimSpace(immediate(t, `PRINT USING "!", "HELLO"`))
+	if out != "H" {
+		t.Fatalf("using bang: %q", out)
+	}
+}
+
+func TestOnError(t *testing.T) {
+	out := runProgram(t, "10 ON ERROR GOTO 50\n20 PRINT 1/0\n30 PRINT \"NO\"\n40 END\n50 PRINT ERR; ERL\n60 RESUME 40\n")
+	if strings.Contains(out, "NO") {
+		t.Fatalf("should skip line 30: %q", out)
+	}
+	if !strings.Contains(out, "48") {
+		t.Fatalf("ERR not 48: %q", out)
+	}
+	if !strings.Contains(out, "20") {
+		t.Fatalf("ERL not 20: %q", out)
+	}
+}
+
+func TestModifiers(t *testing.T) {
+	out := runProgram(t, "10 PRINT I IF I<>2 FOR I=1 TO 3\n20 PRINT \"X\" UNLESS 1=1\n30 END\n")
+	got := strings.ReplaceAll(out, " ", "")
+	if !strings.Contains(got, "1\n") || !strings.Contains(got, "3\n") {
+		t.Fatalf("for/if: %q", out)
+	}
+	if strings.Contains(out, "X") {
+		t.Fatalf("unless fired: %q", out)
+	}
+	out = strings.TrimSpace(immediate(t, `PRINT I FOR I=1 TO 3`))
+	got = strings.ReplaceAll(out, " ", "")
+	if !strings.Contains(got, "1") || !strings.Contains(got, "3") {
+		t.Fatalf("immediate for: %q", out)
+	}
+}
+
+func TestSysAndCvt(t *testing.T) {
+	out := strings.TrimSpace(immediate(t, `PRINT SYS(CHR$(1))`))
+	if !strings.Contains(out, "RSTS") || !strings.Contains(out, "V7.2") {
+		t.Fatalf("sys: %q", out)
+	}
+	out = runProgram(t, "10 A$=CVT%$(1234)\n20 PRINT CVT$%(A$)\n30 END\n")
+	if strings.TrimSpace(out) != "1234" {
+		t.Fatalf("cvt: %q", out)
+	}
+	out = runProgram(t, "10 X=1.5\n20 A$=CVTF$(X)\n30 PRINT CVT$F(A$)\n40 END\n")
+	if !strings.Contains(strings.TrimSpace(out), "1.5") {
+		t.Fatalf("cvtf: %q", out)
+	}
+}
+
+func TestPDP1170(t *testing.T) {
+	if got := strings.TrimSpace(immediate(t, "PRINT SWAP%(1)")); got != "256" {
+		t.Fatalf("swap 1: %q", got)
+	}
+	if got := strings.TrimSpace(immediate(t, "PRINT SWAP%(256)")); got != "1" {
+		t.Fatalf("swap 256: %q", got)
+	}
+	out := runProgram(t, "10 PRINT (PEEK(518%) AND 255%)/2%\n20 END\n")
+	if strings.TrimSpace(out) != "1" {
+		t.Fatalf("peek job: %q", out)
+	}
+	out = strings.TrimSpace(immediate(t, "PRINT TIME(0)"))
+	n := 0.0
+	if _, err := fmt.Sscanf(out, "%f", &n); err != nil || n < 0 || n >= 86400 {
+		t.Fatalf("time(0): %q", out)
+	}
+	out = strings.TrimSpace(immediate(t, "PRINT DATE(0)"))
+	if out == "" || out == "0" {
+		t.Fatalf("date(0): %q", out)
+	}
+	out = runProgram(t, "10 CHANGE SYS(CHR$(6%)+CHR$(-3%)) TO T%\n20 PRINT T%(4%)\n30 PRINT T%(5%)+SWAP%(T%(6%))\n40 END\n")
+	got := strings.Fields(out)
+	if len(got) < 2 || got[0] != "63" || got[1] != "1920" {
+		t.Fatalf("uu.tb1: %q", out)
+	}
+	ident := strings.TrimSpace(immediate(t, `PRINT RIGHT$(SYS(CHR$(6%)+CHR$(9%)+CHR$(0%)),3%)`))
+	if !strings.Contains(ident, "RSTS") {
+		t.Fatalf("ident: %q", ident)
+	}
+	if got := strings.TrimSpace(immediate(t, `PRINT RIGHT$("ABCD",3)`)); got != "CD" {
+		t.Fatalf("right$: %q", got)
+	}
+	if got := strings.TrimSpace(immediate(t, "PRINT PEEK(-2%)")); got != "0" {
+		t.Fatalf("psw peek: %q", got)
+	}
+}
+
+func TestRecordIO(t *testing.T) {
+	dir := t.TempDir()
+	c := &capture{}
+	m := NewMachine(IO{
+		Write: c.write,
+		Read:  c.read,
+		Open: func(m *Machine, ch int, path, mode string) error {
+			f, err := os.OpenFile(filepath.Join(dir, path), os.O_RDWR|os.O_CREATE, 0o644)
+			if err != nil {
+				return err
+			}
+			m.Files[ch] = &chanFile{file: f, mode: mode}
+			return nil
+		},
+	})
+	src := `10 OPEN "REC.DAT" AS FILE 1, RECORDSIZE 16
+20 FIELD #1, 8 AS A$, 8 AS B$
+30 LSET A$ = "HELLO"
+40 LSET B$ = "WORLD"
+50 PUT #1, RECORD 1
+60 LSET A$ = "XXXX"
+70 GET #1, RECORD 1
+80 PRINT A$; B$
+90 CLOSE 1
+100 END
+`
+	if err := m.LoadSource(src, "REC"); err != nil {
+		t.Fatal(err)
+	}
+	if err := m.RunProgram(); err != nil {
+		t.Fatal(err)
+	}
+	out := c.out.String()
+	if !strings.Contains(out, "HELLO") || !strings.Contains(out, "WORLD") {
+		t.Fatalf("record: %q", out)
+	}
+}
+
+func TestMatAdd(t *testing.T) {
+	out := strings.TrimSpace(runProgram(t, `10 DIM A(3,3), B(3,3), C(3,3)
+20 MAT READ A, B
+35 DATA 1,2,3, 4,5,6, 7,8,9
+36 DATA 9,8,7, 6,5,4, 3,2,1
+40 MAT C = A + B       ! Add two matrices
+50 MAT PRINT C;       ! Print result matrix
+60 END
+`))
+	want := "10 10 10\n 10 10 10\n 10 10 10"
+	if out != want {
+		t.Fatalf("mat add:\n got %q\nwant %q", out, want)
+	}
+}
+
+func TestMatFillAndScale(t *testing.T) {
+	out := strings.TrimSpace(runProgram(t, `10 DIM A(2,2), B(2,2)
+20 MAT A = CON
+30 MAT B = (3)*A
+40 MAT PRINT B;
+50 END
+`))
+	want := "3 3\n 3 3"
+	if out != want {
+		t.Fatalf("mat scale: %q", out)
+	}
+}
+
+func TestNum1(t *testing.T) {
+	out := strings.TrimSpace(immediate(t, `PRINT "Record #"+NUM1$(12)`))
+	if out != "Record #12" {
+		t.Fatalf("num1$: %q", out)
+	}
+}
+
+func TestVirtualMap(t *testing.T) {
+	dir := t.TempDir()
+	c := &capture{}
+	m := NewMachine(IO{
+		Write: c.write,
+		Read:  c.read,
+		Open: func(m *Machine, ch int, path, mode string) error {
+			f, err := os.OpenFile(filepath.Join(dir, path), os.O_RDWR|os.O_CREATE, 0o644)
+			if err != nil {
+				return err
+			}
+			m.Files[ch] = &chanFile{file: f, mode: mode}
+			return nil
+		},
+	})
+	src := `10 OPEN "DATA.TMP" AS FILE 1%, ORGANIZATION VIRTUAL
+20 MAP (DATMAP) LONG X%, STRING A$ = 20
+30 FOR I% = 1% TO 1000%
+40   X% = I% * 5% \ A$ = "Record #" + NUM1$(I%)
+50   PUT #1%, RECORD I%
+60 NEXT I%
+70 GET #1%, RECORD 1
+80 PRINT X%; A$
+90 GET #1%, RECORD 1000
+100 PRINT X%; A$
+110 CLOSE #1%
+120 END
+`
+	if err := m.LoadSource(src, "DATA"); err != nil {
+		t.Fatal(err)
+	}
+	if err := m.RunProgram(); err != nil {
+		t.Fatal(err)
+	}
+	out := c.out.String()
+	if !strings.Contains(out, "5") || !strings.Contains(out, "Record #1") {
+		t.Fatalf("record 1: %q", out)
+	}
+	if !strings.Contains(out, "5000") || !strings.Contains(out, "Record #1000") {
+		t.Fatalf("record 1000: %q", out)
+	}
+}
+
+func TestComp(t *testing.T) {
+	src := samples["100,100"]["COMP.BAS"]
+	if src == "" {
+		t.Fatal("missing COMP.BAS sample")
+	}
+	dir := t.TempDir()
+	c := &capture{}
+	m := NewMachine(IO{
+		Write: c.write,
+		Read:  c.read,
+		Open: func(m *Machine, ch int, path, mode string) error {
+			real := filepath.Join(dir, path)
+			var f *os.File
+			var err error
+			switch mode {
+			case "INPUT":
+				f, err = os.Open(real)
+			case "OUTPUT":
+				f, err = os.Create(real)
+			case "APPEND":
+				f, err = os.OpenFile(real, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o644)
+			default:
+				f, err = os.OpenFile(real, os.O_RDWR|os.O_CREATE, 0o644)
+			}
+			if err != nil {
+				return err
+			}
+			cf := &chanFile{file: f, mode: mode}
+			if mode == "INPUT" {
+				cf.r = bufio.NewReader(f)
+			}
+			m.Files[ch] = cf
+			return nil
+		},
+	})
+	if err := m.LoadSource(src, "COMP"); err != nil {
+		t.Fatalf("load: %v", err)
+	}
+	if err := m.RunProgram(); err != nil {
+		t.Fatalf("run: %v\n%s", err, c.out.String())
+	}
+	out := c.out.String()
+	if strings.Contains(out, "FAIL") {
+		t.Fatalf("comp failures:\n%s", out)
+	}
+	if !strings.Contains(out, "ALL PASSED") {
+		t.Fatalf("comp did not pass:\n%s", out)
+	}
+}
