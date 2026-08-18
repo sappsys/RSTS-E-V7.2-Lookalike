@@ -149,7 +149,9 @@ func (d *Disk) loadPacksLocked() error {
 	}
 	var file packFile
 	if err := json.Unmarshal(data, &file); err != nil {
-		return err
+		setAside(d.packsPath(), err)
+		d.packs = defaultPacks()
+		return d.savePacksLocked()
 	}
 	if len(file.Packs) == 0 {
 		d.packs = defaultPacks()
@@ -264,6 +266,107 @@ func (d *Disk) resolvePack(spec FileSpec) (*Pack, error) {
 		return nil, fsErr("Disk not mounted")
 	}
 	return p, nil
+}
+
+// Capacity of the real drives, in 512-byte blocks.
+func packCapacity(media string) int {
+	switch media {
+	case "RP06":
+		return 340670
+	case "RP04", "RP05":
+		return 171796
+	case "RP03":
+		return 80000
+	case "RP02":
+		return 40000
+	case "RM02", "RM03":
+		return 131680
+	case "RM05":
+		return 500384
+	case "RM80":
+		return 242606
+	case "RL02":
+		return 20480
+	case "RL01":
+		return 10240
+	case "RK07":
+		return 53790
+	case "RK06":
+		return 27126
+	case "RK05":
+		return 4800
+	case "RS04":
+		return 2048
+	case "RS03":
+		return 1024
+	case "RA80":
+		return 237212
+	case "RA81":
+		return 891072
+	case "RA60":
+		return 400176
+	default:
+		return 40000
+	}
+}
+
+// Cluster size the pack would have been initialized with. A file occupies
+// whole clusters, which is why small files still cost several blocks.
+func packCluster(media string) int {
+	switch media {
+	case "RP06", "RP05", "RP04", "RM02", "RM03", "RM05", "RM80",
+		"RA80", "RA81", "RA60":
+		return 4
+	case "RP03", "RP02", "RK07", "RK06":
+		return 2
+	default:
+		return 1
+	}
+}
+
+// PackUsage walks the pack and returns its capacity and the blocks in use,
+// counting each file as the whole clusters it occupies and charging one
+// block per account directory for the UFD, the way a RSTS pack does.
+func (d *Disk) PackUsage(p *Pack) (capacity, used int) {
+	capacity = packCapacity(p.Media)
+	if !p.Init {
+		return capacity, 0
+	}
+	cluster := packCluster(p.Media)
+	root := d.packRoot(p)
+	entries, err := os.ReadDir(root)
+	if err != nil {
+		return capacity, 0
+	}
+	used = 1 // MFD
+	for _, acct := range entries {
+		if !acct.IsDir() {
+			continue
+		}
+		used++ // UFD for the account
+		files, err := os.ReadDir(filepath.Join(root, acct.Name()))
+		if err != nil {
+			continue
+		}
+		for _, f := range files {
+			if f.IsDir() || strings.HasPrefix(f.Name(), ".") {
+				continue
+			}
+			info, err := f.Info()
+			if err != nil {
+				continue
+			}
+			blocks := int((info.Size() + blockSize - 1) / blockSize)
+			if blocks == 0 {
+				blocks = 1
+			}
+			used += ((blocks + cluster - 1) / cluster) * cluster
+		}
+	}
+	if used > capacity {
+		used = capacity
+	}
+	return capacity, used
 }
 
 func (d *Disk) packRoot(p *Pack) string {

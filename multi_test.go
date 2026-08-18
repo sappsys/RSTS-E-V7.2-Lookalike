@@ -70,12 +70,24 @@ func TestJobTable(t *testing.T) {
 	}
 }
 
+// waitJobs lets spawned sessions finish writing to the disk before the
+// test framework deletes the directory underneath them.
+func waitJobs(sys *System, want int) {
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) && sys.JobCount() > want {
+		time.Sleep(10 * time.Millisecond)
+	}
+}
+
+func waitNoJobs(sys *System) { waitJobs(sys, 0) }
+
 func TestTelnetLogin(t *testing.T) {
 	cfg := Config{MaxUsers: 3, Telnet: true, TelnetPort: 0, TelnetBind: "127.0.0.1", Console: false}
 	sys, err := NewSystem(t.TempDir(), cfg)
 	if err != nil {
 		t.Fatal(err)
 	}
+	defer waitNoJobs(sys)
 	defer sys.Close()
 	addr, err := sys.StartTelnet()
 	if err != nil {
@@ -118,6 +130,7 @@ func TestTelnetBusy(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	defer waitNoJobs(sys)
 	defer sys.Close()
 	addr, err := sys.StartTelnet()
 	if err != nil {
@@ -149,6 +162,9 @@ func TestSystatAndPK(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	// The PK: children below outlive the body of the test; only this
+	// console job should still be there when the directory goes away.
+	defer waitJobs(sh.sys, 1)
 	sh.Login("GUEST", "GUEST")
 	var out strings.Builder
 	sh.out = &out

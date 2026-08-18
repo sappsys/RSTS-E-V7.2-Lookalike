@@ -305,6 +305,19 @@ type Disk struct {
 	packs []*Pack
 }
 
+// setAside renames a control file the loader could not parse, so a fresh
+// default can be written in its place while the damaged one is kept for
+// inspection. A garbled accounts.json or packs.json should not stop the
+// system from booting.
+func setAside(path string, cause error) {
+	backup := path + ".bad"
+	if err := os.Rename(path, backup); err != nil {
+		return
+	}
+	fmt.Fprintf(os.Stderr, "?%s is damaged (%v)\n", filepath.Base(path), cause)
+	fmt.Fprintf(os.Stderr, "  saved as %s, rebuilding defaults\n", filepath.Base(backup))
+}
+
 func OpenDisk(root string) (*Disk, error) {
 	sy := filepath.Join(root, "SY")
 	if err := os.MkdirAll(sy, 0o755); err != nil {

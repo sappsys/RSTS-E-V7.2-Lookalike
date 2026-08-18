@@ -43,6 +43,7 @@ type telnetConn struct {
 	r       *bufio.Reader
 	wmu     sync.Mutex
 	echo    bool
+	rawEcho bool
 	ttype   string
 	cols    int
 	rows    int

@@ -171,8 +171,10 @@ type stmt struct {
 }
 
 type parser struct {
-	tokens []token
-	i      int
+	tokens  []token
+	i       int
+	markRef bool
+	refs    []int // byte offsets of line numbers used as references
 }
 
 func parseSourceLine(text string) ([]stmt, error) {
@@ -182,6 +184,22 @@ func parseSourceLine(text string) ([]stmt, error) {
 	}
 	p := parser{tokens: toks}
 	return p.parseLine()
+}
+
+// lineRefOffsets returns where in the text each line number reference
+// begins: the targets of GOTO, GOSUB, ON ... GOTO/GOSUB, THEN, ELSE,
+// RESUME and ON ERROR GOTO. RENUM rewrites exactly these, which is why it
+// asks the grammar rather than guessing at the text.
+func lineRefOffsets(text string) ([]int, error) {
+	toks, err := tokenize(text)
+	if err != nil {
+		return nil, err
+	}
+	p := parser{tokens: toks, markRef: true}
+	if _, err := p.parseLine(); err != nil {
+		return nil, err
+	}
+	return p.refs, nil
 }
 
 func (p *parser) tok() token { return p.tokens[p.i] }
@@ -1005,6 +1023,9 @@ func stringsHasSuffix(s, sfx string) bool {
 func (p *parser) lineRef() (expr, error) {
 	if p.tok().kind == tokNumber {
 		v := p.tok().num
+		if p.markRef {
+			p.refs = append(p.refs, p.tok().pos)
+		}
 		p.i++
 		return numLit{v: v}, nil
 	}

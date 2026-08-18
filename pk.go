@@ -343,6 +343,10 @@ func closeChanFile(f *chanFile) {
 	if f.file != nil {
 		_ = f.file.Close()
 	}
+	if f.onClose != nil {
+		f.onClose()
+		f.onClose = nil
+	}
 }
 
 func formatCPU(d time.Duration) string {

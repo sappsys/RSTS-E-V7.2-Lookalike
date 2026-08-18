@@ -92,7 +92,9 @@ func (db *AccountDB) Load() error {
 	}
 	var file accountFile
 	if err := json.Unmarshal(data, &file); err != nil {
-		return err
+		setAside(db.Path, err)
+		db.Accounts = cloneDefaults()
+		return db.saveLocked()
 	}
 	if len(file.Accounts) == 0 {
 		db.Accounts = cloneDefaults()
@@ -103,7 +105,24 @@ func (db *AccountDB) Load() error {
 		a := file.Accounts[i]
 		db.Accounts[i] = &a
 	}
+	if db.ensureSystemLocked() {
+		return db.saveLocked()
+	}
 	return nil
+}
+
+// The system account is structural: DSKINT puts [1,2] on every pack and
+// DELETE/ACCOUNT refuses to remove it. Restore it if the file was edited
+// or truncated to drop it, or nothing could administer the system.
+func (db *AccountDB) ensureSystemLocked() bool {
+	for _, a := range db.Accounts {
+		if a != nil && a.Proj == 1 && a.Prog == 2 {
+			return false
+		}
+	}
+	system := defaultAccounts[0]
+	db.Accounts = append([]*Account{&system}, db.Accounts...)
+	return true
 }
 
 func (db *AccountDB) Save() error {

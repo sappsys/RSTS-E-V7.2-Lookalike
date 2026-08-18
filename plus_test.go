@@ -235,10 +235,93 @@ func TestVirtualMap(t *testing.T) {
 }
 
 func TestComp(t *testing.T) {
-	src := samples["100,100"]["COMP.BAS"]
+	if samples["100,100"]["COMP.BAS"] != "" {
+		t.Error("COMP.BAS belongs to [1,2] only")
+	}
+	src := samples["1,2"]["COMP.BAS"]
 	if src == "" {
 		t.Fatal("missing COMP.BAS sample")
 	}
+	dir := t.TempDir()
+	// COMP.BAS chains to itself, so it has to be on the account it runs from.
+	if err := os.WriteFile(filepath.Join(dir, "COMP.BAS"), []byte(src), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	c := &capture{}
+	var m *Machine
+	m = NewMachine(IO{
+		Write: c.write,
+		Read:  c.read,
+		Open: func(m *Machine, ch int, path, mode string) error {
+			real := filepath.Join(dir, path)
+			var f *os.File
+			var err error
+			switch mode {
+			case "INPUT":
+				f, err = os.Open(real)
+			case "OUTPUT":
+				f, err = os.Create(real)
+			case "APPEND":
+				f, err = os.OpenFile(real, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o644)
+			default:
+				f, err = os.OpenFile(real, os.O_RDWR|os.O_CREATE, 0o644)
+			}
+			if err != nil {
+				return err
+			}
+			cf := &chanFile{file: f, mode: mode}
+			if mode == "INPUT" {
+				cf.r = bufio.NewReader(f)
+			}
+			m.Files[ch] = cf
+			return nil
+		},
+		Delete: func(path string) error { return os.Remove(filepath.Join(dir, path)) },
+		Rename: func(old, new string) error {
+			return os.Rename(filepath.Join(dir, old), filepath.Join(dir, new))
+		},
+		Load: func(name string) error {
+			if !strings.Contains(name, ".") {
+				name += ".BAS"
+			}
+			text, err := os.ReadFile(filepath.Join(dir, name))
+			if err != nil {
+				return basicErr("Can't find file or account")
+			}
+			return m.LoadSource(string(text), "COMP")
+		},
+	})
+	if err := m.LoadSource(src, "COMP"); err != nil {
+		t.Fatalf("load: %v", err)
+	}
+	if err := m.RunProgram(); err != nil {
+		t.Fatalf("run: %v\n%s", err, c.out.String())
+	}
+	out := c.out.String()
+	if strings.Contains(out, "FAIL") {
+		t.Fatalf("comp failures:\n%s", out)
+	}
+	if !strings.Contains(out, "ALL PASSED") {
+		t.Fatalf("comp did not pass:\n%s", out)
+	}
+	if !strings.Contains(out, "CHAINED TO LINE 8000") {
+		t.Fatalf("comp did not chain:\n%s", out)
+	}
+	// The chained pass ends by KILLing everything it made.
+	left, err := os.ReadDir(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, e := range left {
+		if e.Name() != "COMP.BAS" {
+			t.Errorf("scratch file left behind: %s", e.Name())
+		}
+	}
+}
+
+// Run from an account that has no COMP.BAS to chain to, the exerciser
+// should say so and still report its totals rather than failing.
+func TestCompWithoutChainTarget(t *testing.T) {
 	dir := t.TempDir()
 	c := &capture{}
 	m := NewMachine(IO{
@@ -268,16 +351,20 @@ func TestComp(t *testing.T) {
 			m.Files[ch] = cf
 			return nil
 		},
+		Delete: func(path string) error { return os.Remove(filepath.Join(dir, path)) },
+		Rename: func(old, new string) error {
+			return os.Rename(filepath.Join(dir, old), filepath.Join(dir, new))
+		},
 	})
-	if err := m.LoadSource(src, "COMP"); err != nil {
-		t.Fatalf("load: %v", err)
+	if err := m.LoadSource(samples["1,2"]["COMP.BAS"], "COMP"); err != nil {
+		t.Fatal(err)
 	}
 	if err := m.RunProgram(); err != nil {
 		t.Fatalf("run: %v\n%s", err, c.out.String())
 	}
 	out := c.out.String()
-	if strings.Contains(out, "FAIL") {
-		t.Fatalf("comp failures:\n%s", out)
+	if !strings.Contains(out, "CHAIN SKIPPED") {
+		t.Fatalf("expected the chain to be skipped:\n%s", out)
 	}
 	if !strings.Contains(out, "ALL PASSED") {
 		t.Fatalf("comp did not pass:\n%s", out)

@@ -58,7 +58,9 @@ func (m *Machine) runImage(img *pcodeImage, immediate bool) error {
 	m.running = true
 	m.Stopped = false
 	m.HasLine = !immediate
+	started, waitBase := m.startCPU()
 	defer func() {
+		m.chargeCPU(started, waitBase)
 		m.running = false
 		if immediate {
 			m.HasLine = false
@@ -1033,7 +1035,9 @@ func (vm *pvm) execSleep() error {
 	if n < 0 {
 		n = 0
 	}
-	deadline := time.Now().Add(time.Duration(n * float64(time.Second)))
+	start := time.Now()
+	deadline := start.Add(time.Duration(n * float64(time.Second)))
+	defer vm.m.noteWait(start)
 	for time.Now().Before(deadline) {
 		if vm.m.Interrupted() {
 			return ErrInterrupt

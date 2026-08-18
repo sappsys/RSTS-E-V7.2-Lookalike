@@ -31,6 +31,7 @@ Topics:
   FILES     DIR, TYPE, COPY, KILL, NAME
   BASIC     NEW, OLD, SAVE, COMPILE, LIST, RUN
   LANG      BASIC-PLUS statements
+  EDIT      screen editor (VTEDIT style)
   FN        built-in functions
   COMMANDS  keyboard commands
   SET       WIDTH / ECHO
@@ -106,6 +107,7 @@ LIST [n[-m]]        list program lines
 RUN [name]          run (loads .BAC then .BAS if a name is given)
 RUNNH / LISTNH      same, without the header
 CONT                continue after STOP (not if the program was edited)
+RENUM [start][,inc] resequence lines, default 10,10
 DELETE n[-m]        delete program lines
 CLEAR               reset variables
 
@@ -113,6 +115,21 @@ A line that starts with a number is stored in the program:
   10 PRINT "HI"
   20 END
   RUN
+
+RENUM resequences the program and follows every reference with it:
+GOTO, GOSUB, ON ... GOTO, ON ... GOSUB, THEN, ELSE, RESUME and
+ON ERROR GOTO.
+
+  RENUM               start at 10, count by 10
+  RENUM 100           start at 100, count by 10
+  RENUM 100,20        start at 100, count by 20
+  RENUM ,5            start at 10, count by 5
+  RENUMBER            the same command
+
+ON ERROR GOTO 0 and RESUME 0 are left alone: the 0 is not a line. A
+reference to a line that does not exist is left as it was and reported,
+rather than being pointed at some other line. The last line may not go
+past 32767. CONT will not resume a program after RENUM.
 `,
 	"LANG": `Statements:
   LET  PRINT  INPUT  LINE INPUT  PRINT USING
@@ -155,7 +172,7 @@ String:  LEN LEFT$ RIGHT$ MID$ INSTR CHR$ ASC STR$ VAL NUM1$ NUM$
 
 DATE / DATE(0)   integer date  (year-1970)*1000 + yearday
 TIME / TIME(0)   seconds since midnight (KW11-L 60 Hz clock)
-TIME(1)          CPU seconds this job
+TIME(1)          CPU seconds this job has used (waits are not charged)
 DATE$ / TIME$    printable date and time
 PEEK(addr)       16-bit word at even byte address (monitor / I/O page)
 SWAP%(n)         swap bytes of a 16-bit word (T%(11%)+SWAP%(T%(12%)))
@@ -246,12 +263,27 @@ output. CLOSE #n hangs up the spawned job.
 	"DISKS": `RSTS/E V7.2 disk packs (UMOUNT). A pack sits on a physical unit
 and is logically mounted before you can store files on it.
 
+A device name is two letters for the kind of drive, a unit number, and
+a colon. The letters come from the PDP-11 handlers:
+
+  DB:  RP04/RP05/RP06  MASSBUS RH70   340670 blocks on an RP06
+  DL:  RL01/RL02       UNIBUS RL11     20480 blocks on an RL02
+  DM:  RK06/RK07       UNIBUS RK611    53790 blocks on an RK07
+  DK:  RK05            UNIBUS RK11      4800 blocks
+  DP:  RP02/RP03       UNIBUS RP11     80000 blocks on an RP03
+  DR:  RM02/RM03/RM05  MASSBUS        131680 blocks on an RM03
+  DS:  RS03/RS04       MASSBUS          2048 blocks, fixed head
+  DU:  RA60/RA80/RA81  MSCP UDA50     237212 blocks on an RA80
+
+SY: is not a drive: it is the public structure, the system disk.
+DSK: and LB: mean the same. Here SY:, SY0: and DB0: are one RP06.
+
 Devices on this 11/70:
 
   SY:  SY0:  DB0:   RP06 system pack SYSDSK  (always mounted, public)
-  DB1:              RP06
-  DL0: DL1:         RL02
-  DM0:              RK07
+  DB1:              RP06, sample pack PAYROL, not mounted
+  DL0: DL1:         RL02, empty
+  DM0:              RK07, empty
 
   MOUNT device: packid [/PRIVATE] [/PUBLIC] [/WRITE] [/RONLY]
   DISMOUNT device: [packid]
@@ -265,6 +297,8 @@ Examples:
   DIR DB1:
   SAVE DB1:FOO
   DISMOUNT DB1:
+  DSKINT DL0: WORK      put a new pack on an empty unit
+  MOUNT DL0: WORK
 
 /PUBLIC requires privilege (adds the pack to the public structure).
 Ordinary users mount private packs. SY0:/DB0: cannot be dismounted.
@@ -308,6 +342,21 @@ attached:  SYSTAT/D  is the same as  SYSTAT /D.
   SYSTAT n            one job
 
 WHO is SYSTAT/U. SHOW DISKS is SYSTAT/D. Type HELP DISKS for MOUNT.
+
+The numbers are measured, not decoration:
+
+  Size      the job's own storage in K-words (a word is two bytes):
+            program text, variables, arrays, the string pool, and one
+            buffer per open channel. A virtual array is charged to its
+            file, not to the job.
+  Run-Time  processor time the job has used. Waiting at Ready, at INPUT
+            or in SLEEP is a wait state and is not charged.
+  SYSTAT/M  Monitor and the BASIC-PLUS RTS are resident. The RTS is
+            reentrant, so one 16K copy serves every job; each job pays
+            only for its own data. Free is what is left of 1920K.
+  SYSTAT/D  Size and Free are real blocks on the pack, counting whole
+            clusters per file plus the MFD and one UFD per account.
+            Open is the number of files open on that pack right now.
 `,
 	"SHOW": `V7.2 used SYSTAT, not DCL SHOW. These SHOW words are accepted as
 aliases for the same displays:
@@ -333,7 +382,7 @@ and attached switches work: SYSTAT/D, DISMOU DB1:, HLP DISK.
   DIR  CAT  TYPE  COPY  PIP  KILL  UNSAVE  NAME
   ASSIGN  DEASSIGN
   NEW  OLD  SAVE  REPLACE  COMPILE  LIST  LISTNH  RUN  RUNNH  CONT
-  DELETE  CLEAR  SET  TTYSET
+  EDIT  VTEDIT  RENUM  RENUMBER  DELETE  CLEAR  SET  TTYSET
   SYSTAT  SYS  WHO
   MOUNT  DISMOUNT  DSKINT  UMOUNT
   ATTACH  DETACH  FORCE  HANGUP  BROADCAST  SEND
@@ -362,8 +411,39 @@ operator console queue. Use SEND or BROADCAST.
 `,
 	"QUE": `QUE / QUMRUN batch and print queues are not configured on this system.
 `,
-	"TECO": `TECO and VTEDIT are not installed. Use OLD / LIST / SAVE to edit
-BASIC-PLUS programs in memory, or TYPE / COPY for files.
+	"EDIT": `EDIT is a screen editor in the spirit of VTEDIT, the macro package
+RSTS sites layered on TECO for full-screen editing on a VT52.
+
+  EDIT                edit the program in memory
+  EDIT filespec       edit a file  (created on write if it is new)
+  VTEDIT              the same command
+
+  arrow keys          move
+  ^A / ^E             start / end of line
+  RETURN              split the line
+  DEL, ^H             rub out the character before the cursor
+  ^D                  delete the character under the cursor
+  ^K                  delete the whole line
+  ^W                  write
+  ^X                  write and exit
+  ^C                  exit  (twice, if there are unsaved changes)
+  ^L                  redraw
+
+The line at the foot of the screen shows the file, where you are, and
+whether anything is unsaved.
+
+EDIT with no file name edits the BASIC-PLUS program in memory, line
+numbers and all. On write, every line is parsed first: if any line will
+not compile, nothing is stored and the reason appears on the status
+line, so a typo cannot lose the edit. EDIT of a file writes it back
+through the normal file system, so protection codes are enforced and
+kept. A compiled .BAC cannot be edited.
+
+The real TECO is not installed.
+`,
+	"TECO": `TECO itself is not installed. Type EDIT for the screen editor,
+which covers what VTEDIT was used for. OLD / LIST / SAVE still work for
+BASIC-PLUS programs, and TYPE / COPY for files.
 `,
 	"PDP": `Type HELP HARDWARE
 `,
@@ -423,20 +503,29 @@ that run only (see HELP COMPILE).
 `,
 }
 
+// One layout for the heading and every row of a directory listing:
+// name and type left, size and protection right, date left, time right so
+// that the AM and PM line up.
+const dirRowFormat = "%-9s.%-3s  %6s  %5s  %-9s  %8s"
+
 func FormatDir(dev, ppn string, infos []FileInfo) string {
 	var b strings.Builder
 	if dev == "" {
 		dev = "SY:"
 	}
 	fmt.Fprintf(&b, "%s[%s]\n", dev, ppn)
-	b.WriteString("Name .Typ    Size    Prot     Date        Time")
+	// The header and the rows share one format, so the labels always sit
+	// over their columns.
+	fmt.Fprintf(&b, dirRowFormat, "Name", "Typ", "Size", "Prot", "Date", "Time")
 	blocks := 0
 	for _, info := range infos {
-		name := padRight(clip(info.NamePart(), 9), 9)
-		ext := padRight(clip(info.ExtPart(), 3), 3)
 		blocks += info.Blocks()
-		fmt.Fprintf(&b, "\n%s.%s %6d    <%3d>  %s  %s",
-			name, ext, info.Blocks(), info.Prot,
+		b.WriteString("\n")
+		fmt.Fprintf(&b, dirRowFormat,
+			clip(info.NamePart(), 9),
+			clip(info.ExtPart(), 3),
+			strconv.Itoa(info.Blocks()),
+			fmt.Sprintf("<%3d>", info.Prot),
 			info.Modified.Format("02-Jan-06"),
 			strings.TrimLeft(info.Modified.Format("3:04 PM"), "0"))
 	}
@@ -474,7 +563,10 @@ type terminal interface {
 type stdTerm struct {
 	in  *bufio.Reader
 	out io.Writer
+	raw *term.State
 }
+
+func (t *stdTerm) Write(p []byte) (int, error) { return t.out.Write(p) }
 
 func (t *stdTerm) ReadLine(prompt string) (string, error) {
 	if prompt != "" {
@@ -600,6 +692,7 @@ func (sys *System) newSession(job *Job, out io.Writer, term terminal) *Shell {
 }
 
 func (s *Shell) seedSamples() error {
+	seeds := loadSeeds(s.Disk.Root)
 	for ppn, files := range samples {
 		parts := strings.SplitN(ppn, ",", 2)
 		proj, _ := strconv.Atoi(parts[0])
@@ -627,19 +720,20 @@ func (s *Shell) seedSamples() error {
 			case strings.HasSuffix(strings.ToUpper(name), ".TXT") && proj == 1 && prog == 2:
 				prot = 40
 			}
-			if _, err := os.Stat(path); err == nil {
-				refresh := strings.EqualFold(name, "NOTICE.TXT") || strings.EqualFold(name, "LOGIN.TXT") || strings.HasSuffix(strings.ToUpper(name), ".BAC")
-				if !refresh {
-					if prot != defaultProt {
-						_ = s.Disk.SetProt(spec, proj, prog, true, prot)
-					}
-					continue
+			if !seeds.replaces(path, body, proj, prog) {
+				if prot != defaultProt {
+					_ = s.Disk.SetProt(spec, proj, prog, true, prot)
 				}
+				continue
 			}
 			if err := s.Disk.WriteText(spec, proj, prog, true, body, prot); err != nil {
 				return err
 			}
+			seeds.record(path, body)
 		}
+	}
+	if err := seeds.save(s.Disk.Root); err != nil {
+		return err
 	}
 	return nil
 }
@@ -772,6 +866,18 @@ func (s *Shell) openBasicFile(m *Machine, channel int, path, mode string) error 
 	cf := &chanFile{file: f, mode: mode}
 	if mode == "INPUT" {
 		cf.r = bufio.NewReader(f)
+	}
+	if s.sys != nil {
+		if pack, err := s.Disk.resolvePack(spec); err == nil {
+			dev := pack.Designator()
+			s.sys.notePackOpen(dev, 1)
+			cf.onClose = func() { s.sys.notePackOpen(dev, -1) }
+		}
+	}
+	// Reusing a channel closes whatever was on it, so the file and its
+	// place in the open count are both released.
+	if old := m.Files[channel]; old != nil {
+		closeChanFile(old)
 	}
 	m.Files[channel] = cf
 	return nil
@@ -920,6 +1026,10 @@ func (s *Shell) dispatchCmd(verb, rest string) error {
 		return s.cmdName(rest)
 	case "RENAME":
 		return s.cmdRename(rest)
+	case "RENUM", "RENUMBER", "RESEQ", "RESEQUENCE":
+		return s.cmdRenum(rest)
+	case "EDIT", "VTEDIT":
+		return s.cmdEdit(rest)
 	case "NEW":
 		s.cmdNew(rest)
 	case "OLD":
@@ -1051,6 +1161,20 @@ var keyboardCmds = []string{
 	"CPU", "HARDWARE", "DATE", "TIME", "DAYTIME",
 	"PASSWORD", "CREATE", "REACT", "ACCOUNT", "SHOW", "REMOVE",
 	"CONT", "SET", "TTYSET", "ASSIGN", "DEASSIGN",
+	"RENUM", "RENUMBER", "RESEQ", "RESEQUENCE",
+	"EDIT", "VTEDIT",
+}
+
+// Different spellings of one command, so that an abbreviation shared by
+// only those spellings still resolves instead of looking ambiguous.
+var cmdSynonym = map[string]string{
+	"RENUMBER":   "RENUM",
+	"RESEQ":      "RENUM",
+	"RESEQUENCE": "RENUM",
+	"LOGOUT":     "BYE",
+	"CATALOG":    "CAT",
+	"CONTINUE":   "CONT",
+	"TTYSET":     "SET",
 }
 
 func matchCmd(verb string) string {
@@ -1070,6 +1194,23 @@ func matchCmd(verb string) string {
 	}
 	if len(hits) == 1 {
 		return hits[0]
+	}
+	// RENU matches both RENUM and RENUMBER, which are the same command,
+	// so it is not really ambiguous.
+	canon := ""
+	for _, h := range hits {
+		c := h
+		if alias, ok := cmdSynonym[h]; ok {
+			c = alias
+		}
+		if canon == "" {
+			canon = c
+		} else if canon != c {
+			return verb
+		}
+	}
+	if canon != "" {
+		return canon
 	}
 	return verb
 }
@@ -1434,12 +1575,10 @@ func (s *Shell) syncJob() {
 	}
 	j.Who = who
 	j.What = what
-	j.SizeK = 8
+	j.SizeK = minJobKW
 	if s.Basic != nil {
-		j.SizeK = 8 + len(s.Basic.Program)/5
-		if j.SizeK > 31 {
-			j.SizeK = 31
-		}
+		j.SizeK = s.Basic.SizeKW()
+		j.CPU = s.Basic.CPUTime()
 	}
 	if j.Detached {
 		j.State = "Det"
@@ -1548,6 +1687,7 @@ var helpAlias = map[string]string{
 	"DSKINT": "DISKS", "UMOUNT": "DISKS", "INITIALIZE": "DISKS", "INIT": "DISKS",
 	"ASSIGN": "DISKS", "DEASSIGN": "DISKS", "REASSIGN": "DISKS",
 	"CONT": "BASIC", "CONTINUE": "BASIC",
+	"RENUM": "BASIC", "RENUMBER": "BASIC", "RESEQ": "BASIC",
 	"SET": "SET", "TTYSET": "SET", "ECHO": "SET", "WIDTH": "SET",
 	"SYS": "SYSTAT", "WHO": "SYSTAT", "STATUS": "SYSTAT",
 	"CCL": "COMMANDS", "KEYBOARD": "JOBS", "KEYBOARDS": "JOBS",
@@ -1569,7 +1709,7 @@ var helpAlias = map[string]string{
 	"ADVANCED": "LANG", "STATEMENTS": "LANG", "FUNCTIONS": "FN",
 	"PLEASE": "PLEASE", "OPR": "PLEASE",
 	"QUE": "QUE", "QUEUE": "QUE", "QUMRUN": "QUE",
-	"TECO": "TECO", "VTEDIT": "TECO", "EDIT": "TECO",
+	"TECO": "TECO", "VTEDIT": "EDIT", "EDITOR": "EDIT",
 }
 
 func uniqueStrings(in []string) []string {
@@ -1757,6 +1897,125 @@ func (s *Shell) cmdRename(rest string) error {
 		return nil
 	}
 	return s.cmdName(parts[0] + " AS " + parts[1])
+}
+
+// cmdEdit runs the screen editor on a file, or on the program in memory
+// when no file is named. Text is stored through the usual paths, so
+// protection codes, pack state and program syntax are all still checked.
+func (s *Shell) cmdEdit(rest string) error {
+	acct, err := s.needLogin()
+	if err != nil {
+		return err
+	}
+	raw, ok := s.term.(rawTerm)
+	if !ok {
+		return fsErr("Not a terminal")
+	}
+	name := strings.TrimSpace(rest)
+
+	var title, text string
+	var save func(string) error
+
+	if name == "" {
+		if s.Basic.Compiled {
+			return fsErr("Compiled file")
+		}
+		prog := s.Basic.ProgramName
+		if prog == "" {
+			prog = "NONAME"
+		}
+		title = prog + " (memory)"
+		text = s.Basic.SourceText()
+		save = func(body string) error { return s.editStoreProgram(prog, body) }
+	} else {
+		spec, err := s.parseSpec(name, "BAS")
+		if err != nil {
+			return err
+		}
+		prot := defaultProt
+		if s.Disk.Exists(spec, acct.Proj, acct.Prog, s.priv()) {
+			text, err = s.Disk.ReadText(spec, acct.Proj, acct.Prog, s.priv())
+			if err != nil {
+				return err
+			}
+			if strings.HasPrefix(text, bacMagic) {
+				return fsErr("Compiled file")
+			}
+			prot = s.fileProt(spec)
+		}
+		title = spec.DevName() + spec.Filename()
+		save = func(body string) error {
+			return s.Disk.WriteText(spec, acct.Proj, acct.Prog, s.priv(), body, prot)
+		}
+	}
+
+	was := s.inProgram
+	s.inProgram = false
+	if s.sys != nil {
+		s.sys.SetJob(s.Job, s.Account.Display(), "VTEDIT")
+	}
+	_, err = newEditor(raw, title, text, save).Run()
+	s.inProgram = was
+	s.syncJob()
+	if err != nil {
+		if errors.Is(err, ErrInterrupt) {
+			return nil
+		}
+		return err
+	}
+	return nil
+}
+
+// editStoreProgram replaces the program in memory, refusing the whole
+// edit if a line will not parse so a typo cannot silently drop lines.
+func (s *Shell) editStoreProgram(name, body string) error {
+	scratch := NewMachine(IO{})
+	if err := scratch.LoadSource(body, name); err != nil {
+		return err
+	}
+	return s.Basic.LoadSource(body, name)
+}
+
+// cmdRenum implements RENUM [start][,increment], defaulting to 10,10.
+func (s *Shell) cmdRenum(rest string) error {
+	start, step := 10, 10
+	fields := strings.FieldsFunc(rest, func(r rune) bool {
+		return r == ',' || r == ' ' || r == '\t'
+	})
+	if len(fields) > 2 {
+		fmt.Fprintln(s.out, "?RENUM [start][,increment]")
+		return nil
+	}
+	// A leading comma means "keep the default start", as in RENUM ,20.
+	if strings.HasPrefix(strings.TrimSpace(rest), ",") && len(fields) == 1 {
+		fields = []string{strconv.Itoa(start), fields[0]}
+	}
+	for i, f := range fields {
+		n, err := strconv.Atoi(f)
+		if err != nil {
+			return fsErr("Illegal line number")
+		}
+		if i == 0 {
+			start = n
+		} else {
+			step = n
+		}
+	}
+	if s.Basic.Compiled {
+		return fsErr("Compiled file")
+	}
+	if len(s.Basic.Program) == 0 {
+		return nil
+	}
+	missing, err := s.Basic.Renumber(start, step)
+	if err != nil {
+		return err
+	}
+	for _, n := range missing {
+		fmt.Fprintf(s.out, "?Undefined line number %d\n", n)
+	}
+	s.syncJob()
+	return nil
 }
 
 func (s *Shell) cmdNew(rest string) {
@@ -2370,25 +2629,14 @@ func (s *Shell) printDisks(withHdr bool) {
 				state = "Dsm"
 			}
 		}
-		size := 40000
-		switch p.Media {
-		case "RP06":
-			size = 340670
-		case "RL02":
-			size = 20480
-		case "RK07":
-			size = 53790
-		}
-		free := size / 4
-		if !p.Init {
-			free = size
-		}
+		size, used := s.Disk.PackUsage(p)
+		free := size - used
 		open := 0
-		if p.Mounted {
-			open = 1
+		if p.Mounted && s.sys != nil {
+			open = s.sys.openOnPack(p)
 		}
-		fmt.Fprintf(s.out, "%-6s  %-6s %4d  %6d  %6d    4  %-6s  %s\n",
-			p.Designator(), p.Media, open, size, free, name, state)
+		fmt.Fprintf(s.out, "%-6s  %-6s %4d  %6d  %6d  %3d  %-6s  %s\n",
+			p.Designator(), p.Media, open, size, free, packCluster(p.Media), name, state)
 	}
 	fmt.Fprintln(s.out)
 }

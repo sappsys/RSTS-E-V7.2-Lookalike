@@ -5,6 +5,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 )
 
 type capture struct {
@@ -191,6 +192,7 @@ func TestFileSystem(t *testing.T) {
 	if !strings.Contains(listing, "HELLO") {
 		t.Fatalf("format: %s", listing)
 	}
+	checkDirColumns(t, listing)
 
 	secret, err := ParseFileSpec("[1,2]SECRET.TXT", "")
 	if err != nil {
@@ -338,6 +340,74 @@ func TestShellSeed(t *testing.T) {
 	listing := strings.Join(sh.Basic.Listing(0, 0, false, false), "\n")
 	if !strings.Contains(listing, "HELLO FROM RSTS/E") {
 		t.Fatalf("listing: %s", listing)
+	}
+}
+
+// checkDirColumns holds every heading over the field it names.
+func checkDirColumns(t *testing.T, listing string) {
+	t.Helper()
+	lines := strings.Split(strings.TrimRight(listing, "\n"), "\n")
+	if len(lines) < 3 {
+		t.Fatalf("listing is too short to check:\n%s", listing)
+	}
+	head := lines[1]
+	for _, row := range lines[2:] {
+		if strings.HasPrefix(row, "Total of") || strings.HasPrefix(row, "%No files") {
+			continue
+		}
+		for _, col := range []struct {
+			label string
+			right bool // the field is right aligned under its heading
+		}{
+			{"Name", false},
+			{".Typ", false},
+			{"Size", true},
+			{"Prot", true},
+			{"Date", false},
+			{"Time", true},
+		} {
+			at := strings.Index(head, col.label)
+			if at < 0 {
+				t.Fatalf("heading has no %s:\n%s", col.label, listing)
+			}
+			if col.right {
+				// The heading and the value must end in the same column.
+				end := at + len(col.label)
+				if end > len(row) || row[end-1] == ' ' {
+					t.Errorf("%s is not right aligned under its heading:\n%s\n%s",
+						col.label, head, row)
+				}
+				continue
+			}
+			if at >= len(row) || row[at] == ' ' {
+				t.Errorf("%s does not start under its heading:\n%s\n%s",
+					col.label, head, row)
+			}
+		}
+	}
+}
+
+func TestDirListingColumnsAlign(t *testing.T) {
+	when := time.Date(2026, time.August, 18, 9, 5, 0, 0, time.Local)
+	infos := []FileInfo{
+		{Name: "A.B", Size: 1, Prot: 60, Modified: when},
+		{Name: "LONGNAME9.TXT", Size: 700000, Prot: 232,
+			Modified: when.Add(4 * time.Hour)},
+		{Name: "NOEXT", Size: 512, Prot: 0, Modified: when},
+	}
+	listing := FormatDir("DB1:", "100,100", infos)
+	checkDirColumns(t, listing)
+
+	lines := strings.Split(listing, "\n")
+	width := len(lines[1])
+	for _, row := range lines[2:] {
+		if strings.HasPrefix(row, "Total of") {
+			continue
+		}
+		if len(row) != width {
+			t.Errorf("row is %d wide, heading is %d:\n%s\n%s",
+				len(row), width, lines[1], row)
+		}
 	}
 }
 

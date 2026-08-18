@@ -1,0 +1,256 @@
+RSTS/E V7.2 lookalike -- change log
+===================================
+
+Newest first.
+
+The system portrayed is RSTS/E V7.2 on a PDP-11/70, and that does not
+change. DEC numbered the update level after the dash -- V7.2-10 was a
+real one -- and this project uses that number for its own releases. So
+V7.2-10 is the first release here, V7.2-11 the next, and the emulator
+identifies itself with whichever it is built from: SYS(CHR$(1)) and the
+login banner both report it.
+
+
+V7.2-10   18-Aug-2026
+---------------------
+
+First tagged release.
+https://github.com/sappsys/RSTS-E-V7.2-Lookalike/releases/tag/V7.2-10
+
+Build
+
+  build.sh takes a platform and an architecture and cross compiles to
+  anything the Go toolchain supports:
+
+      ./build.sh                    this machine
+      ./build.sh --mac              Intel and Apple silicon
+      ./build.sh --windows --linux --amd64 --arm64
+      ./build.sh linux/riscv64      any GOOS/GOARCH pair
+      ./build.sh --all              the common targets
+      ./build.sh --everything       all 47 targets Go knows
+
+  Naming a platform without an architecture builds that platform's usual
+  architectures when cross compiling, so --mac produces both an Intel and
+  an Apple silicon binary, and this machine's architecture when building
+  for itself. Output is rsts-PLATFORM-ARCHITECTURE, with .exe on Windows
+  and .wasm for the WebAssembly targets; a build for this machine is also
+  copied to bin/rsts.
+
+  Binaries are now built with CGO disabled, trimmed and stripped, so each
+  one is static and needs no shared libraries at run time. Previously the
+  Linux binary linked libc. (macOS is the exception the toolchain
+  imposes: darwin binaries always link the system libSystem.dylib.)
+
+  --everything reports the five targets that cannot be built without cgo,
+  Android on 386/amd64/arm and both iOS targets, and carries on; the
+  other 42 build clean. An explicitly requested target that fails is
+  still an error.
+
+  The target is unlinked before writing, so a rebuild no longer fails
+  with "Text file busy" while the emulator is running, and --out with an
+  absolute path prints the path correctly.
+
+First run and repair
+
+  Running the binary in an empty directory already built the disk tree
+  and seeded the accounts. Damage is now survivable too: an unreadable
+  accounts.json or packs.json is renamed to NAME.json.bad and rebuilt
+  from defaults with a note on stderr, instead of refusing to start.
+
+  [1,2] is treated as structural. DELETE/ACCOUNT already refused to
+  remove it; it is now restored if the file is edited to drop it, since
+  otherwise nothing could administer the system. A deliberately deleted
+  GUEST or DEMO stays deleted.
+
+  Stock programs are tracked in disk/.seeded.json by content hash, so a
+  newer release can replace a sample the user has never touched while
+  leaving an edited one alone. Files in [1,2] are system supplied and
+  always track the release. Before this, an existing disk kept an old
+  COMP.BAS for ever.
+
+Statistics
+
+  The numbers SYSTAT reports are now measured rather than fixed.
+
+  Job size is computed from what the job actually holds, in K-words of
+  PDP-11 storage: tokenised program text, scalars at one word for % and
+  two for floating, arrays at their real element count, the string pool
+  at its byte length, MAP and RECORDSIZE buffers at their declared size,
+  and 512 bytes per open channel. A virtual array is charged to its file,
+  not to the job. DIM A(20000) moves a job from 2K to 40K; DIM #1,
+  A(20000) leaves it at 2K. It used to be 8K plus a guess from the line
+  count, capped at 31K.
+
+  Run-Time is real processor time. Waiting at Ready, at INPUT and in
+  SLEEP are wait states and are not charged, so an idle job stays at
+  0:00.00 however long it is logged in. It used to be wall clock since
+  the job started. TIME(1) returns the same figure and is no longer wall
+  clock mislabelled as CPU.
+
+  SYSTAT/M balances: Monitor and the BASIC-PLUS RTS are resident, User is
+  the sum of the live job sizes, and Free is the rest of the 1920K. The
+  RTS is reentrant, so its 16K is counted once however many jobs are
+  running BASIC. A per-job breakdown is listed underneath.
+
+  SYSTAT/D Size and Free are real blocks: every file counted as the whole
+  clusters it occupies, plus the MFD and one UFD block per account. Free
+  used to be a quarter of capacity, always. Open is the live count of
+  files open on that pack, and Clu is the pack's real cluster size.
+
+  SYSTAT/S adds the memory, open file and disk figures.
+
+  Capacities and cluster sizes are now right for every drive family the
+  system accepts, not just the six that were listed.
+
+Editor
+
+  EDIT, also spelled VTEDIT, is a screen editor in the spirit of the
+  VTEDIT macro package RSTS sites layered on TECO.
+
+      EDIT              the BASIC program in memory, line numbers and all
+      EDIT NOTES.TXT    a file, created on write if it is new
+
+  Arrow keys move, ^A and ^E go to the ends of a line, RETURN splits, DEL
+  and ^H rub out backwards, ^D deletes forwards, ^K kills a line, ^W
+  writes, ^X writes and exits, ^C leaves (twice if there are unsaved
+  changes) and ^L redraws. A status line shows the file, the position and
+  whether anything is unsaved.
+
+  It writes VT52 sequences to a terminal that reports itself as a VT52
+  and ANSI to everything else, so it suits both a period setup and a
+  modern Telnet client. It is pure Go and adds no dependencies.
+
+  It cannot reach outside the emulator: there is no shell escape and no
+  way to name a host path, because saving goes through the same calls as
+  SAVE and PIP. Protection codes are enforced and preserved and a
+  compiled .BAC is refused. Editing the program in memory parses every
+  line before storing anything, so a syntax error cannot lose the edit.
+
+  TECO itself is still not installed; HELP TECO now points at EDIT.
+
+BASIC-PLUS
+
+  RENUM, also spelled RENUMBER, RESEQ and RESEQUENCE, resequences the
+  program and follows every reference with it: GOTO, GOSUB, ON ... GOTO,
+  ON ... GOSUB, THEN, ELSE, RESUME and ON ERROR GOTO. Default 10,10.
+
+      RENUM            RENUM 100        RENUM 100,20      RENUM ,5
+
+  The 0 in ON ERROR GOTO 0 and RESUME 0 is not a line number and is left
+  alone, and neither is the line number in CHAIN "NEXT" LINE 100, which
+  belongs to the other program. A reference to a line that does not exist
+  is left as it was and reported, rather than being repointed at whatever
+  now occupies that number. The last line may not pass 32767, and CONT
+  will not resume a renumbered program.
+
+Sample programs
+
+  COMP.BAS, the self-checking exerciser, lives on [1,2] only. It used to
+  be on [100,100] as well, where a guest could not read it anyway.
+
+  It now covers everything added since it was written and reports ALL
+  PASSED: 125, up from 97. New sections exercise NAME and KILL as
+  statements, virtual arrays across a close and reopen including the
+  default string length, MAT redimension, SLEEP against the clock, and
+  the new SYS FIP subfunctions. The last test writes its running totals
+  to a scratch file, CHAINs back into itself at line 8000, and the
+  resumed copy reads the totals, KILLs every scratch file it made and
+  prints the summary -- exercising CHAIN with LINE, the variable clearing
+  CHAIN implies, and KILL in one pass.
+
+  Each new check was confirmed to catch a real regression by breaking the
+  implementation underneath it and watching the exerciser fail.
+
+Files and display
+
+  Directory listings line up. The heading and every row now share one
+  format, the time is right aligned so the AM and PM stack, and the
+  protection code keeps the RSTS convention of padding inside the
+  brackets, < 60> against <232>.
+
+Documentation
+
+  The README explains the device names -- DB: for the MASSBUS RP drives,
+  DL: and DM: for the UNIBUS cartridge drives, and the rest -- with the
+  bus, the media and the capacity of each, and what SY: really is. The
+  same table is in HELP DISKS.
+
+  The README also says which reported numbers are measured and which are
+  configuration, so nothing claims more precision than it has.
+
+Fixes
+
+  Reusing a channel, OPEN ... AS FILE 1 twice, replaced the entry without
+  closing the previous file and leaked the descriptor.
+
+  Two tests could fail under -race when the temporary directory was
+  removed while a spawned session was still writing to it. Both wait for
+  the sessions to finish now. This predated the work above.
+
+
+18-Aug-2026  (6b7e929)
+----------------------
+
+The V7.2 features old CUSPs and BASIC-PLUS programs expect.
+
+  CHAIN filespec [LINE n]   hand off to another program
+  SLEEP seconds             wait, interruptible with Ctrl-C
+  CONT                      resume after STOP, refused once the program
+                            has been edited
+  DIM #n, A(m)[=len]        virtual arrays: 2 bytes for %, 4 for
+                            floating, 16 for a string unless told
+                            otherwise
+  MAT A = ZER(n,m)          MAT redimension, also CON and IDN
+  NAME old AS new           as statements, not only keyboard commands
+  KILL filespec
+  ASSIGN device: logical    job logical names, and DEASSIGN
+  SET WIDTH n / ECHO        terminal settings, also spelled TTYSET
+
+  HELLO now types [1,2]NOTICE.TXT and runs LOGIN.BAS or START.BAS from
+  the account if one exists.
+
+  SYS(CHR$(6%)+...) answers more FIP subfunctions: job, keyboard, date,
+  privilege, SY, SY0:, the UU.TRM width and echo.
+
+
+17-Aug-2026  (735f5f0)
+----------------------
+
+Published under the MIT licence. The initial release already provided:
+
+  The system      A Bye / Ready timesharing CLI in the V7.2 CCL style,
+                  with unique command abbreviations and attached
+                  switches. Accounts by PPN with passwords and V7
+                  privilege, REACT-style account management, and file
+                  protection codes including the compiled and privileged
+                  bits.
+
+  Files           PPN directories, filespecs with devices, pack IDs and
+                  <prot>, DIR, TYPE, COPY, PIP, KILL, NAME.
+
+  Disks           Disk packs on units, MOUNT, DISMOUNT and DSKINT,
+                  public and private packs, a sample PAYROL pack.
+
+  Jobs            A shared job table, SYSTAT with its switches, DETACH
+                  and ATTACH, FORCE, HANGUP, BROADCAST, and pseudo
+                  keyboards: OPEN "PK:" forks a job.
+
+  Terminals       Multi-user Telnet as a VT52-style NVT, with the local
+                  console as KB0:.
+
+  BASIC-PLUS      A parser and a private bytecode compiler and virtual
+                  machine, not Digital's P-code. LET, PRINT, INPUT, LINE
+                  INPUT, PRINT USING, control flow, statement modifiers,
+                  DEF FN, DATA and READ, CHANGE, MAT, MAP with
+                  ORGANIZATION VIRTUAL, FIELD with GET and PUT, LSET and
+                  RSET, ON ERROR and RESUME, and the function library
+                  including SYS, PEEK, SWAP%, the CVT family and NUM1$.
+                  COMPILE writes a .BAC whose protection bits can grant
+                  a job temporary privilege for one RUN.
+
+  Hardware        PDP-11/70 constants and the monitor words CUSPs PEEK.
+
+  Sample programs Seeded onto a new disk for [1,2], [100,100] and
+                  [200,200], including the COMP.BAS exerciser.
+
+  Help            HELP with topics and CUSP name aliases.

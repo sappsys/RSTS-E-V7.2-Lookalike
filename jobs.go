@@ -36,7 +36,7 @@ func (j Job) where() string {
 }
 
 func (j Job) cpu() string {
-	return formatCPU(time.Since(j.Started))
+	return formatCPU(j.CPU)
 }
 
 func (sys *System) FindJob(token string) *Job {
@@ -460,26 +460,39 @@ func (s *Shell) printSystatKeyboards() {
 }
 
 func (s *Shell) printSystatMemory() {
-	used := 8
-	njobs := 1
+	used, njobs := 0, 1
 	if s.sys != nil {
 		jobs := s.sys.JobList()
 		njobs = len(jobs)
-		used = 0
 		for _, j := range jobs {
 			used += j.sizeK()
 		}
+	} else if s.Basic != nil {
+		used = s.Basic.SizeKW()
+	}
+	free := MemoryKW - MonitorKW - RTSKW - used
+	if free < 0 {
+		free = 0
+	}
+	plural := "s"
+	if njobs == 1 {
+		plural = ""
 	}
 	fmt.Fprintln(s.out, "Memory:")
-	fmt.Fprintf(s.out, "  User      %5dK  (%d job", used, njobs)
-	if njobs != 1 {
-		fmt.Fprint(s.out, "s")
+	fmt.Fprintf(s.out, "  Monitor   %5dK  resident\n", MonitorKW)
+	fmt.Fprintf(s.out, "  BASIC     %5dK  RTS, reentrant, shared by %d job%s\n", RTSKW, njobs, plural)
+	fmt.Fprintf(s.out, "  User      %5dK  %d job%s\n", used, njobs, plural)
+	fmt.Fprintf(s.out, "  Free      %5dK\n", free)
+	fmt.Fprintf(s.out, "  Cache     %5dK  bipolar\n", CacheKB)
+	fmt.Fprintf(s.out, "  Total     %5dK  usable (%d KW 22-bit space)\n\n", MemoryKW, MemoryMaxKW)
+	if s.sys != nil {
+		fmt.Fprintln(s.out, "Job    Who       What      Size")
+		for _, j := range s.sys.JobList() {
+			who := strings.Trim(j.Who, "[]")
+			fmt.Fprintf(s.out, "%3d  %-9s %-9s %4dK\n", j.Num, clip(who, 9), clip(j.What, 9), j.sizeK())
+		}
+		fmt.Fprintln(s.out)
 	}
-	fmt.Fprintln(s.out, ")")
-	fmt.Fprintf(s.out, "  Monitor     96K\n")
-	fmt.Fprintf(s.out, "  RTS        16K  BASIC\n")
-	fmt.Fprintf(s.out, "  Cache       %dK  bipolar\n", CacheKB)
-	fmt.Fprintf(s.out, "  Total    %5dK  usable (%d KW 22-bit space)\n\n", MemoryKW, MemoryMaxKW)
 }
 
 func (s *Shell) printSystatRTS() {
@@ -514,11 +527,37 @@ func (s *Shell) printSystatStats() {
 	if up < 0 {
 		up = 0
 	}
+	used, cpu, open := 0, time.Duration(0), 0
+	if s.sys != nil {
+		for _, j := range s.sys.JobList() {
+			used += j.sizeK()
+			cpu += j.CPU
+		}
+		open = s.sys.openChannels()
+	}
+	free := MemoryKW - MonitorKW - RTSKW - used
+	if free < 0 {
+		free = 0
+	}
 	fmt.Fprintln(s.out, "Statistics:")
 	fmt.Fprintf(s.out, "  Jobs      %d  (%d logged in, %d configured)\n", njobs, nlog, s.userLimit())
 	fmt.Fprintf(s.out, "  Up        %s\n", formatCPU(up))
-	fmt.Fprintf(s.out, "  CPU       %s  %d Hz\n", CPUName, ClockHz)
-	fmt.Fprintf(s.out, "  Memory    %d K-words\n\n", MemoryKW)
+	fmt.Fprintf(s.out, "  CPU       %s  %d Hz  %s used\n", CPUName, ClockHz, formatCPU(cpu))
+	fmt.Fprintf(s.out, "  Memory    %d K-words  (%dK user, %dK free)\n", MemoryKW, used, free)
+	fmt.Fprintf(s.out, "  Files     %d open\n", open)
+	if s.Disk != nil {
+		var size, freeBlocks int
+		for _, p := range s.Disk.Packs() {
+			if !p.Mounted {
+				continue
+			}
+			cap, used := s.Disk.PackUsage(p)
+			size += cap
+			freeBlocks += cap - used
+		}
+		fmt.Fprintf(s.out, "  Disk      %d blocks, %d free (mounted)\n", size, freeBlocks)
+	}
+	fmt.Fprintln(s.out)
 }
 
 func (s *Shell) printSystatBusy() {

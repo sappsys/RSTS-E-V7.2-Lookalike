@@ -24,6 +24,7 @@ type Job struct {
 	Who      string
 	What     string
 	SizeK    int
+	CPU      time.Duration
 	State    string
 	Started  time.Time
 	Detached bool
@@ -43,6 +44,7 @@ type System struct {
 	jobs     map[int]*Job
 	shells   map[int]*Shell
 	parked   map[int]*Shell
+	packOpen map[string]int
 	pkInUse  map[int]bool
 	listener interface{ Close() error }
 	shutdown chan struct{}
@@ -136,11 +138,52 @@ func (sys *System) JobList() []Job {
 	defer sys.mu.Unlock()
 	out := make([]Job, 0, len(sys.jobs))
 	for i := 1; i <= sys.Config.MaxUsers; i++ {
-		if j := sys.jobs[i]; j != nil {
-			out = append(out, *j)
+		j := sys.jobs[i]
+		if j == nil {
+			continue
 		}
+		job := *j
+		// CPU is charged as a program runs, so read it live rather than
+		// waiting for the job to come back to Ready and resync.
+		if sh := sys.shells[i]; sh != nil && sh.Basic != nil {
+			job.CPU = sh.Basic.CPUTime()
+		}
+		out = append(out, job)
 	}
 	return out
+}
+
+// notePackOpen tracks how many files each pack has open, which is what the
+// Open column of SYSTAT/D reports.
+func (sys *System) notePackOpen(dev string, delta int) {
+	sys.mu.Lock()
+	defer sys.mu.Unlock()
+	if sys.packOpen == nil {
+		sys.packOpen = map[string]int{}
+	}
+	sys.packOpen[dev] += delta
+	if sys.packOpen[dev] <= 0 {
+		delete(sys.packOpen, dev)
+	}
+}
+
+func (sys *System) openOnPack(p *Pack) int {
+	if p == nil {
+		return 0
+	}
+	sys.mu.Lock()
+	defer sys.mu.Unlock()
+	return sys.packOpen[p.Designator()]
+}
+
+func (sys *System) openChannels() int {
+	sys.mu.Lock()
+	defer sys.mu.Unlock()
+	n := 0
+	for _, c := range sys.packOpen {
+		n += c
+	}
+	return n
 }
 
 func (sys *System) JobCount() int {

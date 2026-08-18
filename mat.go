@@ -194,7 +194,7 @@ func (m *Machine) matInput(name string) error {
 	need := rows * cols
 	var vals []string
 	for len(vals) < need {
-		raw, err := m.IO.Read("? ")
+		raw, err := m.readInput("? ")
 		if err != nil {
 			return err
 		}

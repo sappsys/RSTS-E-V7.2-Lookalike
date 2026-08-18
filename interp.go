@@ -59,6 +59,7 @@ type chanFile struct {
 	pkUnit     int
 	orgVirtual bool
 	mapName    string
+	onClose    func()
 }
 
 type fieldSlot struct {
@@ -130,6 +131,8 @@ type Machine struct {
 	resumeLine  int
 	inHandler   bool
 	cpuStart    time.Time
+	cpuNanos    atomic.Int64
+	waitNanos   atomic.Int64
 	intr        atomic.Bool
 	maps        map[string]*mapArea
 	currentMap  string
@@ -182,6 +185,56 @@ func (m *Machine) resetRuntime() {
 	m.currentMap = ""
 	m.paused = nil
 	m.virtNext = map[int]int{}
+}
+
+// CPUTime is the time this job has spent executing BASIC, which is what
+// the RSTS accounting meant by CPU time. Waiting at Ready, at INPUT, or in
+// SLEEP is not charged: on a timesharing system those are wait states and
+// the processor is someone else's.
+func (m *Machine) CPUTime() time.Duration {
+	if m == nil {
+		return 0
+	}
+	return time.Duration(m.cpuNanos.Load())
+}
+
+func (m *Machine) startCPU() (time.Time, int64) {
+	if m == nil {
+		return time.Now(), 0
+	}
+	return time.Now(), m.waitNanos.Load()
+}
+
+func (m *Machine) chargeCPU(since time.Time, waitBase int64) {
+	if m == nil {
+		return
+	}
+	waited := time.Duration(m.waitNanos.Load() - waitBase)
+	if d := time.Since(since) - waited; d > 0 {
+		m.cpuNanos.Add(int64(d))
+	}
+}
+
+// noteWait records time the job spent blocked rather than computing.
+func (m *Machine) noteWait(since time.Time) {
+	if m == nil {
+		return
+	}
+	if d := time.Since(since); d > 0 {
+		m.waitNanos.Add(int64(d))
+	}
+}
+
+// readInput reads a line from the terminal and charges the delay to wait
+// time instead of CPU.
+func (m *Machine) readInput(prompt string) (string, error) {
+	if m.IO.Read == nil {
+		return "", m.err("I/O error")
+	}
+	start := time.Now()
+	s, err := m.IO.Read(prompt)
+	m.noteWait(start)
+	return s, err
 }
 
 func (m *Machine) Interrupt() {
@@ -416,7 +469,9 @@ func (m *Machine) Continue() error {
 	m.running = true
 	m.HasLine = true
 	m.clearInterrupt()
+	started, waitBase := m.startCPU()
 	defer func() {
+		m.chargeCPU(started, waitBase)
 		m.running = false
 		if m.Stopped {
 			m.paused = vm
@@ -843,7 +898,7 @@ func (m *Machine) doInput(s stmt) error {
 		if i != 0 {
 			suffix = "?? "
 		}
-		raw, err := m.IO.Read(suffix)
+		raw, err := m.readInput(suffix)
 		if err != nil {
 			return err
 		}
@@ -868,7 +923,7 @@ func (m *Machine) doLineInput(s stmt) error {
 		}
 		raw, err = m.fileReadLine(int(ch))
 	} else {
-		raw, err = m.IO.Read("")
+		raw, err = m.readInput("")
 	}
 	if err != nil {
 		return err
@@ -1280,7 +1335,7 @@ func (m *Machine) call(name string, args []value) (value, error) {
 		}
 		switch int(which) {
 		case 1:
-			return numValue(time.Since(m.cpuStart).Seconds()), nil
+			return numValue(m.CPUTime().Seconds()), nil
 		default:
 			return numValue(secondsSinceMidnight()), nil
 		}
