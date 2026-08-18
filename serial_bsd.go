@@ -56,7 +56,12 @@ func setSerialSpeed(f *os.File, baud int) error {
 	if err != nil {
 		return err
 	}
-	t.Ispeed = uint32(n)
-	t.Ospeed = uint32(n)
+	assignBaud(&t.Ispeed, n)
+	assignBaud(&t.Ospeed, n)
 	return unix.IoctlSetTermios(fd, unix.TIOCSETA, t)
+}
+
+// Darwin keeps these as uint64; the other BSDs as uint32.
+func assignBaud[T ~uint32 | ~uint64](dst *T, n int) {
+	*dst = T(n)
 }
