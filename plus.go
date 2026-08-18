@@ -428,6 +428,9 @@ func (m *Machine) doGet(s stmt) error {
 	if rec < 1 {
 		return m.err("Illegal record number")
 	}
+	if err := m.lockRecord(f, rec); err != nil {
+		return err
+	}
 	off := int64(rec-1) * int64(f.recSize)
 	if _, err := f.file.Seek(off, io.SeekStart); err != nil {
 		return m.err("I/O error")
@@ -438,6 +441,7 @@ func (m *Machine) doGet(s stmt) error {
 	n, err := io.ReadFull(f.file, f.buf)
 	if err == io.EOF || err == io.ErrUnexpectedEOF {
 		if n == 0 {
+			f.eof = true
 			return m.err("End of file on device")
 		}
 	} else if err != nil {
@@ -483,6 +487,9 @@ func (m *Machine) doPut(s stmt) error {
 	}
 	if rec < 1 {
 		return m.err("Illegal record number")
+	}
+	if err := m.lockRecord(f, rec); err != nil {
+		return err
 	}
 	off := int64(rec-1) * int64(f.recSize)
 	if _, err := f.file.Seek(off, io.SeekStart); err != nil {

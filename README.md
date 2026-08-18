@@ -6,7 +6,7 @@ This is **not** a PDP-11 CPU emulator and **not** RSTS/E V9/V10 (no DCL as the d
 
 ## Version
 
-The system portrayed is **RSTS/E V7.2** on a PDP-11/70, and that does not change. DEC numbered the update level after the dash — `V7.2-10` was a real one — and this project uses that number for its own releases. `V7.2-10` is the first release, `V7.2-11` the next, and the emulator reports whichever it was built from: `SYS(CHR$(1))`, the login banner, and `--version` all agree.
+The system portrayed is **RSTS/E V7.2** on a PDP-11/70, and that does not change. DEC numbered the update level after the dash — `V7.2-10` was a real one — and this project uses that number for its own releases. `V7.2-10` is the first release, `V7.2-11` this one, and the emulator reports whichever it was built from: `SYS(CHR$(1))`, the login banner, and `--version` all agree.
 
 Releases are on [GitHub](https://github.com/sappsys/RSTS-E-V7.2-Lookalike/releases); changes are in [CHANGELOG.txt](CHANGELOG.txt).
 
@@ -84,20 +84,23 @@ Options:
 | `--no-telnet` | Console and serial only |
 | `--version` | Print the release and CPU, e.g. `RSTS V7.2-11  (PDP-11/70)` |
 
-`config.toml`:
+`config.toml` lists every setting. Commented lines are defaults, or options that are not in use. Uncomment a line to override (`--disk`, `--port`, `--guest`, `--login`, `--no-console`, `--no-telnet` still win).
 
 ```toml
-max_users   = 25          # 1..63 jobs
-telnet_port = 23          # use 2323 if not root
-telnet_bind = "0.0.0.0"
-telnet      = true
-console     = true
-serial      = ""          # "/dev/ttyUSB0,/dev/ttyS0"
+# max_users   = 25          # 1..63 jobs
+# telnet_port = 23          # use 2323 if not root
+# telnet_bind = "0.0.0.0"
+# telnet      = true
+# console     = true
+# serial      = ""          # "/dev/ttyUSB0,/dev/ttyS0"
+# disk        = "./disk"    # or $RSTS_DISK
+# guest       = false
+# login       = ""          # console auto-login name
 ```
 
 ## Serial lines
 
-`serial` takes a comma-separated list of devices. Each one is answered at **9600 8N1** and behaves exactly like a Telnet line: its own job, its own `KB:`, and the line offered again when the user logs off, the way a getty would.
+`serial` takes a comma-separated list of devices. Each one is answered at **9600 8N1** by default and behaves exactly like a Telnet line: its own job, its own `KB:`, and the line offered again when the user logs off, the way a getty would. `SET SPEED n` changes the baud on that line.
 
 ```toml
 serial = "/dev/ttyUSB0,/dev/ttyS0"
@@ -139,13 +142,7 @@ socat -d PTY,raw,echo=0,link=/tmp/tty1 PTY,raw,echo=0,link=/tmp/tty2
 # serial = "/tmp/tty1", then talk to /tmp/tty2
 ```
 
-The Unix path is tested end to end against a real line, including a full login. The Windows path is written against the documented API and is checked by the compiler and by `go vet`, but it has not been run against a physical COM port — if you try it, do say how it goes.
-
-Tests:
-
-```bash
-go test ./...
-```
+The Unix path is tested end to end against a real line, including a full login. The Windows path is written against the documented API and is checked by the compiler and by `go vet`, but it has not been run against a physical COM port — if you try it, do say how it goes. Package tests are under [Testing](#testing).
 
 ## Session
 
@@ -203,6 +200,8 @@ PASSWORD                  change your own
 PASSWORD [p,pn] [new]     set another account
 SHOW ACCOUNTS
 REACT CREATE / DELETE / PASSWORD / LIST
+REACT QUOTA [p,pn] n
+REACT JOBQUOTA [p,pn] n
 ```
 
 `[1,2]` cannot be deleted. An account that is logged in cannot be deleted. Creating `[1,*]` requires privilege.
@@ -219,7 +218,7 @@ disk/
   SY/100,100/        HELLO, GUESS, FIB, STARS, ... (sample programs)
   SY/200,200/        HELLO, SIEVE
   DB1/               the sample PAYROL pack, initialized but unmounted
-config.toml          created with defaults
+config.toml          every key listed; defaults and unused stay commented
 ```
 
 The disk root is `./disk`, or `$RSTS_DISK`, or `--disk DIR`; missing parent directories are created. Everything is rechecked at each start, so deleting an account directory or a sample program restores it on the next run.
@@ -240,7 +239,7 @@ Type `HELP` or `HELP topic`. Abbreviations and CUSP names work (`HELP DISK` = `H
 | `LANG` | BASIC-PLUS statements and modifiers |
 | `FN` | Built-in functions and SYS |
 | `COMMANDS` | Keyboard command list |
-| `SET` | WIDTH / ECHO (TTYSET) |
+| `SET` | TTYSET (WIDTH, ECHO, SCOPE, TAB, FORM, FILL, GAG, SPEED, TYPE) |
 | `SYSTAT` | Job/disk/memory switches |
 | `SHOW` | SHOW aliases for SYSTAT |
 | `DISKS` | MOUNT, DISMOUNT, DSKINT, packs |
@@ -249,6 +248,10 @@ Type `HELP` or `HELP topic`. Abbreviations and CUSP names work (`HELP DISK` = `H
 | `HARDWARE` | PDP-11/70 configuration and PEEK |
 | `TELNET` | Multi-user Telnet / VT52 |
 | `JOBS` | SYSTAT, ATTACH, PK: |
+| `QUE` | Line-printer queue and QUMRUN |
+| `PLEASE` | Operator console messages |
+| `QUOLST` | Disk and job quotas |
+| `CCL` | Installed keyboard commands |
 | `HELP` | How to use HELP |
 
 ## Keyboard commands
@@ -261,10 +264,14 @@ Type `HELP` or `HELP topic`. Abbreviations and CUSP names work (`HELP DISK` = `H
 | `TYPE filespec` | Print a file |
 | `COPY src dst` | Copy |
 | `PIP dst=src` | Copy (PIP syntax); `PIP dest<prot>=src` sets protection |
+| `PIP/DE` `/LI` `/RE` `/AP` `/NE` `/PROT:n` `/GO` `/HE` `/DI` `/WI` `/BR` | Delete, list, rename, append, no supersede, protection, continue, help; `PIP dst=a,b` concatenates |
+| `DIR/W` `/S` `/P` `/F` `/N` `/B` `/A` `/C` `/SU` `/H` | Wide, size, protection, full, no header, brief, allocation, cluster, summary, header |
+| `PLEASE` `[text]` | Message to the operator console (`KB0:`); `PLEASE/LI` lists, `PLEASE/RE` replies |
 | `KILL` / `UNSAVE` filespec | Delete |
 | `NAME old AS new` | Rename and/or set `<prot>` |
 | `ASSIGN device: logical` | Job logical name (`ASSIGN DB1: WORK`) |
 | `DEASSIGN [logical]` | Drop one name, or all |
+| `BACKUP` / `BCK` `[filespec] [MT0:]` | Copy files to a magtape image; `BACKUP/RE` restores |
 
 ### BASIC environment
 
@@ -281,7 +288,7 @@ Type `HELP` or `HELP topic`. Abbreviations and CUSP names work (`HELP DISK` = `H
 | `RENUM` / `RENUMBER` `[start][,inc]` | Resequence lines, default `10,10` |
 | `DELETE n[-m]` | Delete program lines |
 | `CLEAR` | Reset variables |
-| `SET WIDTH n` / `SET ECHO` / `SET NOECHO` | Terminal (also `TTYSET`) |
+| `SET WIDTH n` / `ECHO` / `SCOPE` / `TAB` / `FORM` / `FILL n` / `GAG` / `SPEED n` / `TYPE name` | Terminal (also `TTYSET`) |
 
 Numbered lines are stored in the program in memory:
 
@@ -311,10 +318,21 @@ VTEDIT              the same command
 |-----|-|
 | arrows | Move |
 | `^A` / `^E` | Start / end of line |
+| `^]` / `^_` | Word forward / back |
+| `^G` | Go to a line |
 | RETURN | Split the line |
+| `^O` | Open a line (split, stay put) |
 | DEL, `^H` | Rub out the character before the cursor |
 | `^D` | Delete the character under the cursor |
-| `^K` | Delete the line |
+| `^K` | Kill the line (copied for yank) |
+| `^U` | Kill to the start of the line |
+| `^T` | Transpose the last two characters |
+| `^S` / `^R` | Find / reverse find (empty repeats; wraps) |
+| `^\` | Replace (`Y` this, `N` skip, `A` rest, `^G` stop) |
+| `^Y` | Yank the last kill |
+| `^^` | Set mark |
+| `^V` / `^Q` | Copy / cut the region |
+| Insert | Overwrite on or off |
 | `^W` | Write |
 | `^X` | Write and exit |
 | `^C` | Exit (twice if there are unsaved changes) |
@@ -324,7 +342,7 @@ It draws VT52 sequences to a terminal that says it is a VT52 and ANSI to everyth
 
 `EDIT` with no file name edits the program in memory, line numbers included. On write every line is parsed first, and if any line will not compile then nothing is stored and the reason appears on the status line — a typo cannot quietly discard the edit.
 
-`RENUM [start][,increment]` resequences the program, default `10,10`, and follows every reference with it: `GOTO`, `GOSUB`, `ON … GOTO`, `ON … GOSUB`, `THEN`, `ELSE`, `RESUME`, and `ON ERROR GOTO`.
+`RENUM [start][,increment]` resequences the program, default `10,10`, and follows every reference with it: `GOTO`, `GOSUB`, `ON … GOTO`, `ON … GOSUB`, `THEN`, `ELSE`, `RESUME`, `RESTORE`, `ON ERROR GOTO`, and `CHAIN LINE n` when `n` is a line in this program.
 
 ```text
 1 PRINT "START"          10 PRINT "START"
@@ -336,7 +354,7 @@ It draws VT52 sequences to a terminal that says it is a VT52 and ANSI to everyth
 9 END                    70 END
 ```
 
-The `0` in `ON ERROR GOTO 0` and `RESUME 0` is not a line number and is left alone, and so is the line number in `CHAIN "NEXT" LINE 100`, which belongs to the other program. A reference to a line that does not exist is left as it was and reported as `?Undefined line number n`, rather than being silently repointed at whatever now occupies that number. The last line may not pass 32767, and `CONT` will not resume a program once it has been renumbered.
+The `0` in `ON ERROR GOTO 0` and `RESUME 0` is not a line number and is left alone. `CHAIN "NEXT" LINE 100` keeps 100 (that line belongs to NEXT). `CHAIN "COMP" LINE 8000` is rewritten when this program is COMP, so `REPLACE` after `RENUM` still chains into the copy on disk. A reference to a line that does not exist is left as it was and reported as `?Undefined line number n`, rather than being silently repointed at whatever now occupies that number. The last line may not pass 32767, and `CONT` will not resume a program once it has been renumbered.
 
 ### Status and devices
 
@@ -357,11 +375,19 @@ The `0` in `ON ERROR GOTO 0` and `RESUME 0` is not a line number and is left alo
 | Command | |
 |---------|-|
 | `DETACH` | Detach this job from the keyboard |
-| `ATTACH n` | Attach to a detached job you own |
+| `HELLO/DETACH` | Log in and detach (keyboard returns to Bye) |
+| `ATTACH n` | Attach to a detached job you own (priv: anyone's) |
 | `FORCE kb: command` | (priv) Inject a line at another job |
 | `HANGUP n` | Hang up a job (priv, or your PK: child) |
 | `BROADCAST ALL text` | (priv) Message every keyboard |
 | `SEND` / `TALK kb: text` | Message one job |
+| `QUE [filespec]` | Line-printer queue (`QUE/LI`, `QUE/DE n`); `QUMRUN` drains to host `LP0` |
+| `BACKUP` / `BCK` | Copy files to `MT0:` (512-byte host image); `BACKUP/RE` restores |
+| `SUBMIT filespec` | Run a command file as a detached job (`BATCH`) |
+| `QUOLST` | Disk and logged-in job quotas (`QUOLST/SET`, `REACT QUOTA`) |
+| `CCL name=filespec` | (priv) Install a keyboard command |
+| `SHUTUP` | (priv) Halt the system |
+| `UTILITY` | (priv) REACT, DSKINT, CCL, SHUTUP |
 
 ## SYSTAT and SHOW
 
@@ -481,11 +507,11 @@ Non-owners cannot `OLD`, `TYPE`, or `LIST` a compiled file. They may `RUN` a pub
 
 This is **BASIC-PLUS** (the V7 interpreter language), not BASIC-PLUS-2. `HELP LANG` and `HELP FN` are the dialect that actually runs.
 
-Statements: `LET`, `PRINT`, `INPUT`, `LINE INPUT`, `PRINT USING`, `GOTO`, `GOSUB`, `RETURN`, `ON … GOTO/GOSUB`, `IF … THEN … ELSE`, `FOR/NEXT`, `WHILE/NEXT`, `UNTIL/NEXT`, `DIM`, `DIM #n` (virtual arrays), `DATA`, `READ`, `RESTORE`, `CHANGE`, `MAT` (including `ZER(n,m)` redim), `MAP`, `OPEN` / `PRINT#` / `INPUT#`, `GET` / `PUT`, `FIELD`, `LSET` / `RSET`, `CLOSE`, `RANDOMIZE`, `DEF FNx = …`, `ON ERROR GOTO`, `RESUME`, `CHAIN`, `SLEEP`, `NAME`, `KILL`, `END`, `STOP`, `REM` (or `!`).
+Statements: `LET`, `PRINT`, `INPUT`, `LINE INPUT`, `PRINT USING`, `GOTO`, `GOSUB`, `RETURN`, `ON … GOTO/GOSUB`, `IF … THEN … ELSE`, `IF END #n THEN`, `FOR/NEXT`, `WHILE/NEXT`, `UNTIL/NEXT`, `DIM`, `DIM #n` (virtual arrays), `DATA`, `READ`, `RESTORE` / `RESTORE n`, `CHANGE`, `MAT` (including `ZER(n,m)` redim), `MAP`, `OPEN` / `PRINT#` / `INPUT#`, `GET` / `PUT` / `UNLOCK`, `FIELD`, `LSET` / `RSET`, `CLOSE`, `RANDOMIZE`, `DEF FNx = …`, `ON ERROR GOTO`, `RESUME`, `CHAIN`, `COMMON`, `SLEEP`, `WAIT`, `SCALE`, `NAME`, `KILL`, `EXTEND` / `NOEXTEND`, `MID$(A$,i,n)=B$`, `END`, `STOP`, `REM` (or `!`).
 
 Modifiers (rightmost is outermost): `IF`, `UNLESS`, `WHILE`, `UNTIL`, `FOR`. Several statements on one line are separated by `\`. Integer divide is also `\` inside an expression. Relational true is **-1**, false is **0**. Types: `$` string, `%` integer.
 
-Functions: `ABS INT FIX SGN SQR SIN COS TAN ATN LOG EXP RND PI ERR ERL PEEK SWAP% TIME DATE LEN LEFT$ RIGHT$ MID$ INSTR CHR$ ASC STR$ VAL NUM1$ NUM$ SPACE$ STRING$ DATE$ TIME$ TAB SPC POS SYS CVT%$ CVT$% CVTF$ CVT$F CVT$$ RAD$`.
+Functions: `ABS INT FIX SGN SQR SIN COS TAN ATN LOG EXP RND PI ERR ERL PEEK SWAP% TIME DATE LEN LEFT$ RIGHT$ MID$ INSTR CHR$ ASC STR$ VAL NUM1$ NUM$ SPACE$ STRING$ DATE$ TIME$ TAB SPC POS SYS CVT%$ CVT$% CVTF$ CVT$F CVT$$ XLATE XLATE$ RAD$ SPEC%`.
 
 Variables set by the last operation: `RECOUNT`, `STATUS`, `DET`, `NUM`, `NUM2`.
 
@@ -493,9 +519,15 @@ String arithmetic is exact to any length, which is how money was kept before any
 
 `RIGHT$(s,n)` is from character *n* to the end (BASIC-PLUS, not last-*n*).
 
-`SYS(CHR$(n)+…)`: 1=system name, 2=PPN, 3=job, 4=program, 5=date, 6=FIP (0/-21 binary PPN, 1=name, 2=job, 3=KB, 5=date, 9=ident, -3=UU.TB1, -12=UU.TB2, -10=UU.TRM), 7=time, 9=pack SY.
+`SYS(CHR$(n)+…)`: 1=system name, 2=PPN, 3=job, 4=program, 5=date, 6=FIP (0/-21 binary PPN, 1=name, 2=job, 3=KB, 5=date, 6=pack ID, 9=ident, -1 hangup, -3=UU.TB1, -5 assign, -6 deassign, -12=UU.TB2, -10=UU.TRM, -14 disable logins, -16 send, -17 lookup, -7=Ctrl-C trap; other subcodes return zeros), 7=time, 9=pack SY.
 
-`CHAIN filespec [LINE n]` loads and runs another program. `SLEEP n` waits n seconds (Ctrl-C aborts). `CONT` at Ready resumes after `STOP` unless the program was edited.
+`CHAIN filespec [LINE n]` loads and runs another program. `COMMON A, B$(n)` is a positional block that survives `CHAIN`. `SLEEP n` waits n seconds (Ctrl-C aborts). `WAIT n` sets the keyboard timeout for the next `INPUT` (error 15). `CONT` at Ready resumes after `STOP` unless the program was edited. `SYS(CHR$(6%)+CHR$(-7%)+CHR$(1%))` lets `ON ERROR` catch Ctrl-C as error 28.
+
+`OPEN` accepts `MODE n`, `CLUSTERSIZE n` and `FILESIZE n` as well as `RECORDSIZE`. `FILESIZE` allocates that many 512-byte blocks; `CLUSTERSIZE` is what DIR and pack usage count. `MODE` bits: 1 update, 2 append, 8 wait if in use, 16 exclusive locked-open, 32 contiguous, 64 tentative, 128 no supersede (error 16), 256 read regardless of protection. `GET` of a shared record interlocks the block until `UNLOCK`, the next `GET`/`PUT`, or `CLOSE` (error 19 if another job holds it). Sequential `INPUT #` of a shared disk file interlocks the same way. `RESTORE n` rereads `DATA` starting at that line.
+
+`MID$(A$,i,n)=B$` replaces n characters of A$ starting at i. `XLATE`/`XLATE$` translate through a 256-character table (NUL deletes). Default `NOEXTEND` restricts names to one character; `EXTEND` allows up to 29. `SCALE n` (0–6) rounds floating `+ - * /` and stores to n decimals.
+
+Ctrl-O discards output until the next Ctrl-O. Ctrl-R redisplays the input line.
 
 Virtual arrays: `OPEN "FILE.DAT" AS FILE 1` then `DIM #1, A%(100)` or `DIM #1, A$(50)=20`. `%` elements are 2 bytes, floating 4, strings default 16. `MAT A = ZER(n,m)` redimensions.
 
@@ -505,7 +537,7 @@ Virtual arrays: `OPEN "FILE.DAT" AS FILE 1` then `DIM #1, A%(100)` or `DIM #1, A
 
 After `HELLO`, `[1,2]NOTICE.TXT` is typed, then `LOGIN.BAS` or `START.BAS` in the account is `RUN` if present.
 
-Character devices open like files: `OPEN "KB:" AS FILE 1` is your own terminal and `KB3:` is another one (privileged, like `FORCE`), `LP:` is the line printer, spooled to `LPn.LST` in your account because this 11/70 has no printer attached, and `NL:` is the null device, which swallows output and is at end of file at once.
+Character devices open like files: `OPEN "KB:" AS FILE 1` is your own terminal and `KB3:` is another one (privileged, like `FORCE`), `LP:` is the line printer, spooled to `LPn.LST` in your account and entered in `QUE` on `CLOSE` (QUMRUN copies it to host `LP0`), and `NL:` is the null device, which swallows output and is at end of file at once. `MT:` is a magtape image (`disk/MT0`, 512-byte records; `BACKUP` / `BACKUP/RE`). `PP:`/`PR:` are paper tape, `CR:` a card reader, `DX:`/`DT:` floppy and DECtape images. `SPEC%(ch,fn)` rewinds and skips magtape.
 
 `OPEN "PK:" AS FILE n` assigns a pseudo keyboard and forks a job. `PRINT #n` sends keystrokes; `INPUT #n` / `LINE INPUT #n` reads output; `CLOSE #n` hangs up the child. Demo: `OLD PK` then `RUN` on GUEST.
 
@@ -549,7 +581,7 @@ Seeded onto a new disk:
 | `[100,100]` | `HELLO`, `GUESS`, `FIB`, `STARS`, `TABLE`, `NOTE`, `WHILE`, `UNTIL`, `CHANGE`, `USING`, `ERRDEMO`, `MODS`, `CPU`, `PK`, `README.TXT` |
 | `[200,200]` | `HELLO`, `SIEVE` |
 
-`COMP.BAS` is the self-checking exerciser: it covers every statement, modifier, and function this system implements, prints `FAIL n` for any check that does not hold, and ends with `ALL PASSED: n`. It lives on `[1,2]` only, because its last test `CHAIN`s back to itself at line 8000 to print the totals and `KILL` its scratch files. Log in as SYSTEM and type `RUN COMP`. (`CONT` is a keyboard command, so it cannot be exercised from inside a program.)
+`COMP.BAS` is the self-checking exerciser: it covers every statement, modifier, and function this system implements, prints `FAIL n` for any check that does not hold, and ends with `ALL PASSED: n`. It lives on `[1,2]` only, because its last test `CHAIN`s back to itself at line 8000 with `COMMON` carrying the totals, then `KILL`s its scratch files. Log in as SYSTEM and type `RUN COMP`. (`CONT` is a keyboard command, so it cannot be exercised from inside a program.)
 
 ## Design
 
@@ -557,13 +589,14 @@ Not a CPU emulator: the host is a timesharing **user environment**. BASIC is par
 
 | Area | Files |
 |------|--------|
-| CLI, HELP, login, COMPILE, DIR | `shell.go` |
+| CLI, HELP, login, COMPILE, DIR, PIP, QUE, CCL | `shell.go` |
+| PLEASE operator queue | `please.go` |
 | Jobs, SYSTAT, ATTACH, FORCE | `jobs.go` |
 | Shared host, job table | `system.go` |
 | Accounts | `accounts.go` |
 | Filespecs, protection, `.BAC` wrap | `filesystem.go` |
 | Packs, MOUNT/DSKINT | `packs.go` |
-| BASIC lexer / parser / tree helpers | `token.go`, `parser.go`, `interp.go`, `plus.go`, `using.go`, `sys.go` |
+| BASIC lexer / parser / tree helpers | `token.go`, `parser.go`, `interp.go`, `plus.go`, `using.go`, `sys.go`, `v7lang.go` |
 | Bytecode ISA / compiler / VM | `pcode.go`, `pcode_compile.go`, `pcode_vm.go` |
 | 11/70 constants, PEEK | `hardware.go` |
 | Telnet / VT52, raw terminal | `telnet.go`, `rawterm.go` |
@@ -571,9 +604,18 @@ Not a CPU emulator: the host is a timesharing **user environment**. BASIC is par
 | Job memory accounting | `memory.go` |
 | RENUM | `renum.go` |
 | Pseudo keyboards | `pk.go` |
+| Print queue, CCL | `queue.go`, `ccl.go` |
 | Config | `config.go`, `config.toml` |
 | Seeded programs, seed manifest | `samples.go`, `seeds.go` |
 | Entry | `cmd/rsts/main.go` |
+
+## Testing
+
+```bash
+go test ./...
+```
+
+That is the language and CLI suite (`*_test.go` in this directory). `COMP.BAS` on `[1,2]` is the in-system check: log in and `RUN COMP`. Serial lines have an extra Unix PTY test; the Windows COM path is compiled and vetted but not run against hardware.
 
 Changes are recorded in [CHANGELOG.txt](CHANGELOG.txt).
 

@@ -34,13 +34,13 @@ var helpText = map[string]string{
 
 Topics:
   LOGIN     HELLO / BYE
-  FILES     DIR, TYPE, COPY, KILL, NAME
+  FILES     DIR, TYPE, COPY, PIP, KILL, NAME
   BASIC     NEW, OLD, SAVE, COMPILE, LIST, RUN
   LANG      BASIC-PLUS statements
   EDIT      screen editor (VTEDIT style)
   FN        built-in functions
   COMMANDS  keyboard commands
-  SET       WIDTH / ECHO
+  SET       TTYSET (WIDTH, ECHO, SCOPE, TAB, FORM, FILL, GAG, SPEED, TYPE)
   SYSTAT    jobs, disks, memory  (SYS, WHO)
   SHOW      SHOW DISKS / JOBS / CPU / ...
   DISKS     MOUNT, DISMOUNT, packs
@@ -50,12 +50,17 @@ Topics:
   TELNET    multi-user Telnet / VT52
   SERIAL    terminals on serial lines
   JOBS      SYSTAT, ATTACH, PK:
+  QUE       line-printer queue
+  PLEASE    operator console
+  CCL       installed keyboard commands
+  QUOLST    disk and job quotas
   HELP      how to use HELP
 
 Abbreviations work (HELP DISK = HELP DISKS).  HELP MOUNT, HELP SYSTAT,
 HELP DIRECTORY, HELP HELLO, and HELP PIP are accepted.
 `,
 	"LOGIN": `HELLO [account]     log in  (account is PPN like 100,100 or a name)
+HELLO/DETACH        log in and detach this job (keyboard returns to Bye)
 BYE                 log out (returns to Bye)
 PASSWORD            change your password
 PASSWORD [p,pn]     (priv) set another account's password
@@ -73,18 +78,42 @@ At Bye:
 
 Ctrl-C stops a running BASIC program and returns to Ready.
 It does not exit the emulator.
+Ctrl-O discards output until the next Ctrl-O.
+Ctrl-R redisplays the input line.
 `,
 	"FILES": `DIR [filespec]              catalog of files
 CAT / CATALOG               same as DIR
 TYPE filespec               print a file
 COPY src dst                copy a file
 PIP dst=src                 copy (PIP syntax)
+PIP/DE filespec             delete
+PIP/LI filespec             list (same as DIR)
+PIP/RE new=old              rename
+PIP dst=src1,src2           concatenate
+PIP/AP /NE /PROT:n /GO /HE  append, no supersede, protection, continue, help
+PIP/DI /WI /BR              list / wide / brief
+DIR/W /S /P /F /N /B /A /C /SU /H
+                            wide, size, prot, full, no header, brief,
+                            allocation, cluster, summary, header
+PLEASE message              send to the operator console (KB0:)
+PLEASE/LI                   (priv/console) list the PLEASE queue
+PLEASE/RE job text          (priv/console) reply to that job
+QUE [filespec]              print queue; QUE/DE n  QUE/LI  QUMRUN
+BACKUP [filespec] [MT0:]    copy files to a magtape image (also BCK)
+BACKUP/RE [MT0:]            restore from that image
+SUBMIT filespec             run a command file as a detached job
+QUOLST                      disk and job quota for this account
+CCL name=filespec           (priv) install a keyboard command
+CCL /DE name                remove; CCL lists them
+SHUTUP                      (priv) halt the system
+UTILITY                     (priv) REACT, DSKINT, CCL, SHUTUP
 KILL filespec               delete a file
 UNSAVE filespec             delete a file
 NAME old AS new             rename
 ASSIGN device: logical      job logical name (ASSIGN DB1: WORK)
 DEASSIGN [logical]          drop one name, or all if omitted
-SET WIDTH n / ECHO / NOECHO terminal (TTYSET)
+SET WIDTH n / ECHO / NOECHO / SCOPE / TAB / FORM / FILL n / GAG / SPEED n / TYPE name
+                            terminal (TTYSET)
 NAME old AS new<prot>       rename and/or set protection
 SYSTAT / SYS / WHO          jobs (RSTS columns)
 ATTACH / DETACH             reconnect a detached job
@@ -124,8 +153,9 @@ A line that starts with a number is stored in the program:
   RUN
 
 RENUM resequences the program and follows every reference with it:
-GOTO, GOSUB, ON ... GOTO, ON ... GOSUB, THEN, ELSE, RESUME and
-ON ERROR GOTO.
+GOTO, GOSUB, ON ... GOTO, ON ... GOSUB, THEN, ELSE, RESUME,
+RESTORE, ON ERROR GOTO, and CHAIN LINE when the filespec is this
+program.
 
   RENUM               start at 10, count by 10
   RENUM 100           start at 100, count by 10
@@ -133,10 +163,12 @@ ON ERROR GOTO.
   RENUM ,5            start at 10, count by 5
   RENUMBER            the same command
 
-ON ERROR GOTO 0 and RESUME 0 are left alone: the 0 is not a line. A
-reference to a line that does not exist is left as it was and reported,
-rather than being pointed at some other line. The last line may not go
-past 32767. CONT will not resume a program after RENUM.
+ON ERROR GOTO 0 and RESUME 0 are left alone: the 0 is not a line.
+CHAIN "OTHER" LINE 100 is left alone. CHAIN "COMP" LINE 8000 is
+rewritten when this program is COMP. A reference to a line that does
+not exist is left as it was and reported, rather than being pointed at
+some other line. The last line may not go past 32767. CONT will not
+resume a program after RENUM.
 `,
 	"LANG": `Statements:
   LET  PRINT  INPUT  LINE INPUT  PRINT USING
@@ -146,24 +178,40 @@ past 32767. CONT will not resume a program after RENUM.
   WHILE ... / NEXT   UNTIL ... / NEXT
   DEF FNx = expr        one line
   DEF FNx(a,b) ... FNEND    many lines, FNEXIT returns early
-  DIM  DIM #n, A(m)[=len]  DATA  READ  RESTORE  CHANGE  MAT
+  DIM  DIM #n, A(m)[=len]  DATA  READ  RESTORE [n]  CHANGE  MAT
   MAT READ/PRINT/INPUT  MAT C = A+B / A-B / A*B / (K)*A
   MAT C = ZER / CON / IDN / TRN(A) / INV(A)
   MAT C = ZER(n,m) / CON(n,m) / IDN(n)   (optional redimension)
   OPEN ... [FOR INPUT/OUTPUT/APPEND] AS FILE #n [, RECORDSIZE n]
+                            [, MODE n] [, CLUSTERSIZE n] [, FILESIZE n]
   OPEN ... AS FILE #n, ORGANIZATION VIRTUAL
   OPEN "PK:" AS FILE n      spawn a job on a pseudo keyboard
   OPEN "KB:" AS FILE n      this terminal, KBn: another one (priv)
-  OPEN "LP:" AS FILE n      the printer, spooled to LPn.LST
+  OPEN "LP:" AS FILE n      the printer, spooled to LPn.LST then QUE
   OPEN "NL:" AS FILE n      the null device
+  OPEN "MT:" AS FILE n      magtape image (disk/MT0, 512-byte records)
+  OPEN "PP:"/"PR:"/"CR:"    paper tape punch/reader, card reader
+  OPEN "DX:"/"DT:"          floppy / DECtape images
   MAP (name) LONG X%, STRING A$ = n
-  GET #n [, RECORD n]   PUT #n [, RECORD n]
+  GET #n [, RECORD n]   PUT #n [, RECORD n]   UNLOCK #n
   FIELD #n, n AS A$   LSET / RSET
   CLOSE #n  RANDOMIZE  DEF FNx = ...
   ON ERROR GOTO n / 0   RESUME [NEXT | n]
-  CHAIN filespec [LINE n]   SLEEP seconds
+  CHAIN filespec [LINE n]   COMMON A, B$(n)   SLEEP seconds
+  WAIT seconds          timeout on the next INPUT (error 15)
+  IF END #n THEN ...    true when the next read would be at EOF
+  MID$(A$,i,n)=B$       replace n characters of A$ starting at i
+  EXTEND / NOEXTEND     default NOEXTEND: names are 1 character
+                            (A, A$, A%, FNA). EXTEND allows 29 characters.
+  SCALE n               round floating results to n decimals (0-6)
   NAME old AS new   KILL filespec
   END  STOP  REM  (or ! comment)
+
+OPEN MODE n bits (combinable): 1 update  2 append  8 wait  16 exclusive
+  32 contiguous  64 tentative  128 no supersede  256 read regardless.
+RESTORE n rereads DATA starting at that line (or the next DATA at or
+after it). SPEC%(ch,fn) is magtape control: 0/5 rewind, 1 write mark,
+2 skip forward, 3 skip reverse, 4 skip to tape mark.
 
 Statement modifiers (rightmost is outermost):
   statement IF cond
@@ -180,7 +228,8 @@ Relational true is -1, false is 0
          PEEK SWAP% TIME DATE
 String:  LEN LEFT$ RIGHT$ MID$ INSTR CHR$ ASC STR$ VAL NUM1$ NUM$
          SPACE$ STRING$ DATE$ TIME$ TAB SPC POS SYS
-         CVT%$ CVT$% CVTF$ CVT$F CVT$$
+         CVT%$ CVT$% CVTF$ CVT$F CVT$$ XLATE XLATE$
+         RAD$ SPEC%
 
 RECOUNT          characters the last INPUT or GET transferred
 STATUS           the last OPEN: device class low, channel high
@@ -197,9 +246,15 @@ SWAP%(n)         swap bytes of a 16-bit word (T%(11%)+SWAP%(T%(12%)))
 RIGHT$(s,n)      from character n to the end (BASIC-PLUS, not last-n)
 
 SYS(CHR$(n)+...): 1=system, 2=PPN, 3=job, 4=program, 5=date,
-  6=FIP  0/-21=binary PPN  1=name  2=job  3=KB  5=date  7=minutes
-     8=priv  9=ident  10=SY  14=SY0:  -2=echo  -8=KB unit
-     -3=UU.TB1  -12=UU.TB2  -10=UU.TRM (width/echo)
+  6=FIP  0/-21=binary PPN  1=name  2=job  3=KB  4=program  5=date
+     6=pack ID  7=minutes  8=priv  9=ident  10=SY  11=BASIC  12=BASIC+
+     14=SY0:  -1=hangup  -2=echo  -5=assign  -6=deassign
+     -8=KB unit  -9=date$  -3=UU.TB1  -12=UU.TB2
+     -10=UU.TRM (width/echo)  -11=extra TRM (speed/type)
+     -13=job CPU/size  -14=disable logins  -15=enable logins
+     -16=send/broadcast  -17=directory lookup
+     -7=Ctrl-C trap (CHR$(1%) enable, CHR$(0%) disable)
+     other FIP subcodes return zeros
   7=time, 9=pack SY
 ERR and ERL are the last trapped error number and line.
 String arithmetic is exact to any length, which is how money was kept:
@@ -209,6 +264,9 @@ String arithmetic is exact to any length, which is how money was kept:
 
 CVT%$ / CVT$% pack 16-bit integers.
 CVTF$ / CVT$F pack IEEE float32 (the real 11/70 FPP was FP11-C).
+SPEC%(ch%,fn%) magtape/device: 0 rewind, 1 write mark, 2 skip fwd,
+  3 skip reverse, 4 skip to mark, 5 rewind. Other files: fn 0 is size
+  in blocks.
 `,
 	"HARDWARE": `This is ` + SystemLong + ` on a PDP-11/70.
 
@@ -243,12 +301,17 @@ Type SHOW CPU  or  OLD CPU  then RUN.
 serial line is a RSTS job on its own KB: line (KB0: is the console).
 
   config.toml
-    max_users    = 25     simultaneous jobs (1..63)
-    telnet_port  = 23     listener port (2323 if not root)
-    telnet_bind  = "0.0.0.0"
-    telnet       = true
-    console      = true
-    serial       = ""     "/dev/ttyUSB0,/dev/ttyS0"
+    # max_users    = 25     simultaneous jobs (1..63)
+    # telnet_port  = 23     listener port (2323 if not root)
+    # telnet_bind  = "0.0.0.0"
+    # telnet       = true
+    # console      = true
+    # serial       = ""     "/dev/ttyUSB0,/dev/ttyS0"
+    # disk         = "./disk"
+    # guest        = false
+    # login        = ""
+
+Defaults and unused keys stay commented in the file. Uncomment to override.
 
 Connect with any Telnet client. Terminal type VT52 is the baseline
 (ESC A/B/C/D/H/J/K/Y/Z). ANSI/VT100 cursor keys are accepted too.
@@ -267,8 +330,9 @@ USB-serial adapters can be hung off the emulator this way with no
 network at all. Type HELP SERIAL.
 `,
 	"SERIAL": `Serial lines. Each device named in serial is answered at
-9600 8N1 and is a RSTS job on its own KB: line, exactly like a Telnet
-connection. When the user logs off the line is offered again.
+9600 8N1 by default and is a RSTS job on its own KB: line, exactly
+like a Telnet connection. SET SPEED n changes the baud on that line
+(50 through 115200). When the user logs off the line is offered again.
 
   config.toml
     serial = "/dev/ttyUSB0,/dev/ttyS0"
@@ -301,11 +365,17 @@ then set serial = "/tmp/tty1" and talk to /tmp/tty2.
   SYS                       same as SYSTAT
   WHO                       logged-in jobs only
   DETACH                    detach this job from the keyboard
+  HELLO/DETACH              log in and detach (keyboard returns to Bye)
   ATTACH n                  attach to a detached job you own
+                            (privileged: anyone's detached job)
   FORCE kb: command         inject a command (privileged)
   HANGUP n                  hang up a job/line (privileged)
   BROADCAST ALL text        message every keyboard (privileged)
   SEND kb: text             message one job
+  SHUTUP                    (priv) halt every job and the listener
+  UTILITY                   (priv) REACT, DSKINT, CCL, SHUTUP
+
+SET GAG drops BROADCAST ALL on this keyboard.
 
 States: KB wait, RN running, Det detached.
 Where is KBn: or PKn: (pseudo keyboard).
@@ -369,19 +439,34 @@ Job logical names (in addition to pack IDs):
   DEASSIGN WORK        DEASSIGN     (all)
 
 A sample pack PAYROL is initialized on DB1: and left unmounted.
-`,
-	"SET": `Terminal settings (TTYSET). Stored on this job; Telnet echo and
-width follow SET ECHO / SET WIDTH.
 
+Character devices besides disk:
+
+  KB: TT:   this job's terminal (KBn: another one)
+  LP:       line printer, spooled then drained by QUMRUN to LP0
+  NL:       null
+  MT: MM: MS:  magtape image  disk/MT0  (512-byte records; BACKUP)
+  PP: PR:   paper-tape punch / reader
+  CR:       card reader (80 columns)
+  DX: DT:   floppy / DECtape images
+`,
+	"SET": `Terminal settings (TTYSET). Stored on this job.
+
+  SET                 show current settings
   SET WIDTH n
-  SET ECHO
-  SET NOECHO
+  SET ECHO / NOECHO
+  SET SCOPE / NOSCOPE     CRT vs hardcopy; EDIT needs SCOPE
+  SET TAB / NOTAB         NOTAB expands tabs to spaces
+  SET FORM / NOFORM       NOFORM strips form feeds
+  SET FILL n              NUL fill after CR (and after PRINT newline)
+  SET GAG / NOGAG         GAG drops BROADCAST ALL
+  SET SPEED n             serial baud (50..115200); Telnet is unchanged
+  SET TYPE name           VT52, LA36, ... (what EDIT draws)
   SET TERMINAL WIDTH n
   TTYSET WIDTH n
-  SET                 show current width and echo
 
 Width is 0..255. SYS(CHR$(6%)+CHR$(-10%)) returns the width in the
-first word of a 30-byte buffer (UU.TRM).
+first word of a 30-byte buffer (UU.TRM). Echo is UU.TRM as well.
 `,
 	"SYSTAT": `SYSTAT is the V7.2 status CUSP (also typed as SYS). Switches may be
 attached:  SYSTAT/D  is the same as  SYSTAT /D.
@@ -438,19 +523,22 @@ and attached switches work: SYSTAT/D, DISMOU DB1:, HLP DISK.
   HELLO  BYE  PASSWORD
   EXIT  QUIT              at Bye, stop the emulator
   DIR  CAT  TYPE  COPY  PIP  KILL  UNSAVE  NAME
+  PLEASE  QUE  QUMRUN  CCL  SUBMIT  QUOLST  BACKUP  BCK
   ASSIGN  DEASSIGN
   NEW  OLD  SAVE  REPLACE  COMPILE  LIST  LISTNH  RUN  RUNNH  CONT
   EDIT  VTEDIT  RENUM  RENUMBER  DELETE  CLEAR  SET  TTYSET
   SYSTAT  SYS  WHO
   MOUNT  DISMOUNT  DSKINT  UMOUNT
   ATTACH  DETACH  FORCE  HANGUP  BROADCAST  SEND
+  SHUTUP  UTILITY
   DATE  TIME  DAYTIME
   CREATE  DELETE/ACCOUNT  REACT
   SHOW  HELP
   CPU  HARDWARE
 
 Type HELP topic. Topics: LOGIN FILES BASIC LANG FN COMMANDS SYSTAT
-SHOW DISKS ACCOUNTS COMPILE HARDWARE TELNET JOBS SET
+SHOW DISKS ACCOUNTS COMPILE HARDWARE TELNET JOBS SET QUE CCL QUOLST
+PLEASE
 `,
 	"HELP": `Help can be obtained on a topic by typing:
 
@@ -462,12 +550,61 @@ prefix. Attached switches are ignored (HELP SYSTAT/D = HELP SYSTAT).
 
 Additional help is available on:
   LOGIN FILES BASIC LANG FN COMMANDS SYSTAT SHOW DISKS
-  ACCOUNTS COMPILE HARDWARE TELNET JOBS SET HELP
+  ACCOUNTS COMPILE HARDWARE TELNET JOBS SET QUE CCL QUOLST PLEASE HELP
 `,
-	"PLEASE": `PLEASE sent a message to the operator on V7.2. This system has no
-operator console queue. Use SEND or BROADCAST.
+	"PLEASE": `PLEASE sends a message to the operator console (KB0:). Messages
+are queued in please.json under the disk root even if no console is
+attached.
+
+  PLEASE text               send a message
+  PLEASE                    prompt for the message
+  PLEASE/LI                 list the queue (privileged or console)
+  PLEASE/RE job text        reply to that job (privileged or console)
+  OPR                       the same command
+
+The operator sees:
+
+  PLEASE n from [p,pn] KBn:
+    text
 `,
-	"QUE": `QUE / QUMRUN batch and print queues are not configured on this system.
+	"QUE": `QUE is the line-printer queue. OPEN "LP:" writes LPn.LST in the
+account and, on CLOSE, enters that file in the queue. QUMRUN drains
+the queue onto the host printer file LP0 under the disk root.
+
+  QUE filespec     queue a file for LP:
+  QUE  QUE/LI      list the queue
+  QUE/DE n         delete entry n (your jobs, or all if privileged)
+  QUMRUN           show the spooler and the queue
+
+SUBMIT (also BATCH) runs a command file as a detached job: each line
+is typed at Ready the way you would type it, and the keyboard is free.
+
+  SUBMIT filespec
+  BATCH filespec
+`,
+	"QUOLST": `QUOLST shows the disk and logged-in job quotas for this account.
+Privileged users may give a PPN or name, and may set the limits.
+
+  QUOLST
+  QUOLST [p,pn]
+  QUOLST/SET [p,pn] n     (priv) disk block quota (0 = unlimited)
+  QUOLST/JOB [p,pn] n     (priv) logged-in job quota
+  REACT QUOTA [p,pn] n
+  REACT JOBQUOTA [p,pn] n
+
+A Quota is the block limit for that PPN. Zero means no limit. Writing
+a file that would go over it is error 4, ?No room for user on device,
+including PRINT #. JobQuota is how many jobs that account may have
+logged in at once (zero means no limit).
+`,
+	"CCL": `CCL installs a program as a keyboard command, the way UTILITY did.
+
+  CCL name=filespec     (priv)  RUN that program when name is typed
+  CCL/DE name           (priv)  remove it
+  CCL                   list installed commands
+
+Unique prefixes work. Built-in commands always win, so you cannot
+replace DIR or SYSTAT. The program is RUN as if you had typed RUN filespec.
 `,
 	"EDIT": `EDIT is a screen editor in the spirit of VTEDIT, the macro package
 RSTS sites layered on TECO for full-screen editing on a VT52.
@@ -478,17 +615,30 @@ RSTS sites layered on TECO for full-screen editing on a VT52.
 
   arrow keys          move
   ^A / ^E             start / end of line
+  ^] / ^_             word forward / back
+  ^G                  go to a line
   RETURN              split the line
+  ^O                  open a line (split, stay put)
   DEL, ^H             rub out the character before the cursor
   ^D                  delete the character under the cursor
-  ^K                  delete the whole line
+  ^K                  kill the whole line (copied for ^Y)
+  ^U                  kill to the start of the line
+  ^T                  transpose the last two characters
+  ^S / ^R             find / reverse find  (empty repeats)
+  ^\                  replace  (Y = this, N = skip, A = rest, ^G = stop)
+  ^Y                  yank the last kill
+  ^^                  set mark
+  ^V / ^Q             copy / cut the region
+  Insert              overwrite on or off
   ^W                  write
   ^X                  write and exit
   ^C                  exit  (twice, if there are unsaved changes)
   ^L                  redraw
 
-The line at the foot of the screen shows the file, where you are, and
-whether anything is unsaved.
+Find, replace and go-to-line prompt on the status line. ^G or ^C
+cancels a prompt. Find wraps around the file; replace runs from the
+cursor to the end. The line at the foot of the screen shows the file,
+where you are, and whether anything is unsaved.
 
 EDIT with no file name edits the BASIC-PLUS program in memory, line
 numbers and all. On write, every line is parsed first: if any line will
@@ -552,6 +702,9 @@ privileged user (REACT on a real system):
   PASSWORD [p,pn] [new]     (priv) set that account's password
   SHOW ACCOUNTS             (priv) list PPNs and names
   REACT CREATE / DELETE / PASSWORD / LIST
+  REACT QUOTA [p,pn] n      disk block quota (0 = unlimited)
+  REACT JOBQUOTA [p,pn] n   logged-in job quota
+  QUOLST/SET [p,pn] n
 
 CREATE of [1,*] is privileged. [1,2] cannot be deleted.
 An account that is logged in cannot be deleted.
@@ -566,6 +719,7 @@ that run only (see HELP COMPILE).
 // that the AM and PM line up.
 const dirRowFormat = "%-9s.%-3s  %6s  %5s  %-9s  %8s"
 
+// FormatDir is the full DIR listing: name, type, size, protection, date, time.
 func FormatDir(dev, ppn string, infos []FileInfo) string {
 	var b strings.Builder
 	if dev == "" {
@@ -586,6 +740,190 @@ func FormatDir(dev, ppn string, infos []FileInfo) string {
 			fmt.Sprintf("<%3d>", info.Prot),
 			info.Modified.Format("02-Jan-06"),
 			strings.TrimLeft(info.Modified.Format("3:04 PM"), "0"))
+	}
+	if len(infos) == 0 {
+		b.WriteString("\n%No files")
+	} else {
+		plural := "s"
+		if len(infos) == 1 {
+			plural = ""
+		}
+		fmt.Fprintf(&b, "\nTotal of %d file%s, %d blocks", len(infos), plural, blocks)
+	}
+	return b.String()
+}
+
+// parseCmdSwitches pulls /SWITCH and /SWITCH:value from anywhere in rest
+// (DIR *.BAS/W, PIP FILE/DE). A bare "=" in PIP dst=src is not a switch.
+func parseCmdSwitches(rest string) (map[string]string, string) {
+	sw := map[string]string{}
+	var arg strings.Builder
+	i := 0
+	for i < len(rest) {
+		if rest[i] == '/' {
+			i++
+			start := i
+			for i < len(rest) && rest[i] != '/' && rest[i] != ' ' && rest[i] != '\t' && rest[i] != '=' && rest[i] != ':' {
+				i++
+			}
+			name := strings.ToUpper(rest[start:i])
+			val := ""
+			if i < len(rest) && (rest[i] == ':' || rest[i] == '=') {
+				i++
+				vstart := i
+				for i < len(rest) && rest[i] != '/' && rest[i] != ' ' && rest[i] != '\t' {
+					i++
+				}
+				val = rest[vstart:i]
+			}
+			if name != "" {
+				sw[name] = val
+			}
+			continue
+		}
+		arg.WriteByte(rest[i])
+		i++
+	}
+	return sw, strings.TrimSpace(arg.String())
+}
+
+func switchOn(sw map[string]string, names ...string) bool {
+	for raw := range sw {
+		for _, n := range names {
+			n = strings.ToUpper(n)
+			if raw == n || strings.HasPrefix(n, raw) {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+// switchMin is true when a typed switch is a unique prefix of canon of
+// at least min letters. SIZE is "/S"; SUMMARY needs "/SU" so they do not
+// collide.
+func switchMin(sw map[string]string, canon string, min int) bool {
+	canon = strings.ToUpper(canon)
+	for raw := range sw {
+		if strings.HasPrefix(canon, raw) && len(raw) >= min {
+			return true
+		}
+	}
+	return false
+}
+
+func switchValue(sw map[string]string, names ...string) string {
+	for raw, v := range sw {
+		for _, n := range names {
+			n = strings.ToUpper(n)
+			if raw == n || strings.HasPrefix(n, raw) {
+				return v
+			}
+		}
+	}
+	return ""
+}
+
+// FormatDirWide is DIR/W and DIR/B: names in four columns, optional header.
+func FormatDirWide(dev, ppn string, infos []FileInfo, header bool) string {
+	var b strings.Builder
+	if header {
+		if dev == "" {
+			dev = "SY:"
+		}
+		fmt.Fprintf(&b, "%s[%s]\n", dev, ppn)
+	}
+	if len(infos) == 0 {
+		b.WriteString("%No files")
+		return b.String()
+	}
+	for i, info := range infos {
+		fmt.Fprintf(&b, "%-9s.%-3s", clip(info.NamePart(), 9), clip(info.ExtPart(), 3))
+		if (i+1)%4 == 0 || i == len(infos)-1 {
+			b.WriteByte('\n')
+		} else {
+			b.WriteString("    ")
+		}
+	}
+	return strings.TrimRight(b.String(), "\n")
+}
+
+// FormatDirCols is DIR with selected columns. which is S, P, F, A, C, SU,
+// FA, FC, or FAC (size, protection, full, allocation, cluster, summary).
+func FormatDirCols(dev, ppn string, infos []FileInfo, header bool, which string) string {
+	var b strings.Builder
+	if header {
+		if dev == "" {
+			dev = "SY:"
+		}
+		fmt.Fprintf(&b, "%s[%s]\n", dev, ppn)
+		switch which {
+		case "S":
+			fmt.Fprintf(&b, "%-9s.%-3s  %6s", "Name", "Typ", "Size")
+		case "P":
+			fmt.Fprintf(&b, "%-9s.%-3s  %5s", "Name", "Typ", "Prot")
+		case "A":
+			fmt.Fprintf(&b, "%-9s.%-3s  %6s", "Name", "Typ", "Alloc")
+		case "C":
+			fmt.Fprintf(&b, "%-9s.%-3s  %5s", "Name", "Typ", "Clu")
+		case "FA":
+			fmt.Fprintf(&b, dirRowFormat+"  %5s", "Name", "Typ", "Size", "Prot", "Date", "Time", "Alloc")
+		case "FC":
+			fmt.Fprintf(&b, dirRowFormat+"  %4s", "Name", "Typ", "Size", "Prot", "Date", "Time", "Clu")
+		case "FAC":
+			fmt.Fprintf(&b, dirRowFormat+"  %5s  %4s", "Name", "Typ", "Size", "Prot", "Date", "Time", "Alloc", "Clu")
+		case "SU":
+		default:
+			fmt.Fprintf(&b, dirRowFormat, "Name", "Typ", "Size", "Prot", "Date", "Time")
+		}
+	}
+	blocks := 0
+	for _, info := range infos {
+		blocks += info.Blocks()
+		if which == "SU" {
+			continue
+		}
+		b.WriteString("\n")
+		switch which {
+		case "S":
+			fmt.Fprintf(&b, "%-9s.%-3s  %6s", clip(info.NamePart(), 9), clip(info.ExtPart(), 3), strconv.Itoa(info.Blocks()))
+		case "P":
+			fmt.Fprintf(&b, "%-9s.%-3s  %5s", clip(info.NamePart(), 9), clip(info.ExtPart(), 3), fmt.Sprintf("<%3d>", info.Prot))
+		case "A":
+			fmt.Fprintf(&b, "%-9s.%-3s  %6s", clip(info.NamePart(), 9), clip(info.ExtPart(), 3), strconv.Itoa(info.Alloc))
+		case "C":
+			fmt.Fprintf(&b, "%-9s.%-3s  %5s", clip(info.NamePart(), 9), clip(info.ExtPart(), 3), strconv.Itoa(info.Cluster))
+		case "SU":
+		case "FA":
+			fmt.Fprintf(&b, dirRowFormat+"  %5s",
+				clip(info.NamePart(), 9), clip(info.ExtPart(), 3),
+				strconv.Itoa(info.Blocks()), fmt.Sprintf("<%3d>", info.Prot),
+				info.Modified.Format("02-Jan-06"),
+				strings.TrimLeft(info.Modified.Format("3:04 PM"), "0"),
+				strconv.Itoa(info.Alloc))
+		case "FC":
+			fmt.Fprintf(&b, dirRowFormat+"  %4s",
+				clip(info.NamePart(), 9), clip(info.ExtPart(), 3),
+				strconv.Itoa(info.Blocks()), fmt.Sprintf("<%3d>", info.Prot),
+				info.Modified.Format("02-Jan-06"),
+				strings.TrimLeft(info.Modified.Format("3:04 PM"), "0"),
+				strconv.Itoa(info.Cluster))
+		case "FAC":
+			fmt.Fprintf(&b, dirRowFormat+"  %5s  %4s",
+				clip(info.NamePart(), 9), clip(info.ExtPart(), 3),
+				strconv.Itoa(info.Blocks()), fmt.Sprintf("<%3d>", info.Prot),
+				info.Modified.Format("02-Jan-06"),
+				strings.TrimLeft(info.Modified.Format("3:04 PM"), "0"),
+				strconv.Itoa(info.Alloc), strconv.Itoa(info.Cluster))
+		default:
+			fmt.Fprintf(&b, dirRowFormat,
+				clip(info.NamePart(), 9),
+				clip(info.ExtPart(), 3),
+				strconv.Itoa(info.Blocks()),
+				fmt.Sprintf("<%3d>", info.Prot),
+				info.Modified.Format("02-Jan-06"),
+				strings.TrimLeft(info.Modified.Format("3:04 PM"), "0"))
+		}
 	}
 	if len(infos) == 0 {
 		b.WriteString("\n%No files")
@@ -672,6 +1010,13 @@ type Shell struct {
 	out        io.Writer
 	echo       bool
 	width      int
+	scope      bool
+	tab        bool
+	form       bool
+	fill       int
+	gag        bool
+	speed      int
+	ttype      string
 	logicals   map[string]string
 	console    bool
 }
@@ -714,6 +1059,10 @@ func (sys *System) newSession(job *Job, out io.Writer, term terminal) *Shell {
 		forceCh:  make(chan string, 8),
 		echo:     true,
 		width:    80,
+		scope:    true,
+		tab:      true,
+		form:     true,
+		speed:    9600,
 		logicals: map[string]string{},
 	}
 	s.Basic = NewMachine(IO{
@@ -734,13 +1083,46 @@ func (sys *System) newSession(job *Job, out io.Writer, term terminal) *Shell {
 		},
 		Delete: s.basicKill,
 		Rename: s.basicName,
+		Disk:   sys.Disk,
 		Job:    job.Num,
 		KB:     job.KB,
 		Width:  80,
 		Echo:   true,
+		Speed:  9600,
 		PollInterrupt: func() bool {
 			t, ok := s.term.(interface{ PollInterrupt() bool })
 			return ok && t.PollInterrupt()
+		},
+		Hangup: func() error {
+			if s.sys == nil {
+				return nil
+			}
+			return s.sys.HangupJob(strconv.Itoa(s.Job))
+		},
+		Assign: func(dev, logical string) error {
+			return s.cmdAssign(strings.TrimSpace(dev + " " + logical))
+		},
+		Deassign: func(name string) error {
+			return s.cmdDeassign(name)
+		},
+		Broadcast: func(to, text string) error {
+			if s.sys == nil {
+				return fsErr("Can't find job")
+			}
+			from := "KB?"
+			if s.Account != nil {
+				from = s.Account.Display()
+			}
+			return s.sys.Broadcast(to, from+" "+s.KB, text)
+		},
+		SetLogins: func(off bool) error {
+			if s.sys == nil {
+				return nil
+			}
+			s.sys.mu.Lock()
+			s.sys.noLogins = off
+			s.sys.mu.Unlock()
+			return nil
 		},
 	})
 	s.Basic.cpuStart = sys.Boot
@@ -797,10 +1179,53 @@ func (s *Shell) seedSamples() error {
 }
 
 func (s *Shell) write(text string, newline bool) {
-	fmt.Fprint(s.out, text)
+	fmt.Fprint(s.out, s.formatTTY(text))
 	if newline {
+		if s.fill > 0 {
+			fmt.Fprint(s.out, strings.Repeat("\x00", s.fill))
+		}
 		fmt.Fprint(s.out, "\n")
 	}
+}
+
+func (s *Shell) formatTTY(text string) string {
+	if s == nil {
+		return text
+	}
+	if !s.tab {
+		text = expandTabs(text, 8)
+	}
+	if !s.form {
+		text = strings.ReplaceAll(text, "\f", "")
+	}
+	if s.fill > 0 {
+		pad := strings.Repeat("\x00", s.fill)
+		text = strings.ReplaceAll(text, "\r", "\r"+pad)
+	}
+	return text
+}
+
+func expandTabs(s string, tabw int) string {
+	if tabw < 1 {
+		tabw = 8
+	}
+	var b strings.Builder
+	col := 0
+	for _, r := range s {
+		if r == '\t' {
+			n := tabw - (col % tabw)
+			b.WriteString(strings.Repeat(" ", n))
+			col += n
+			continue
+		}
+		b.WriteRune(r)
+		if r == '\n' || r == '\r' {
+			col = 0
+		} else {
+			col++
+		}
+	}
+	return b.String()
 }
 
 func (s *Shell) read(prompt string) (string, error) {
@@ -911,6 +1336,23 @@ func (s *Shell) openDiskFile(m *Machine, channel int, spec FileSpec, mode string
 			}
 		}
 	}
+	if mode == "OUTPUT" && m.openModeN&modeNoSupersede != 0 {
+		if _, err := os.Stat(real); err == nil {
+			return basicErrCode("Name or account now exists", 16)
+		}
+	}
+	// MODE 256 skips this protection check so a program can read a file
+	// the account would otherwise be denied.
+	if mode == "INPUT" && m.openModeN&modeReadAny == 0 {
+		if _, err := os.Stat(real); err == nil {
+			_, proj, prog, locErr := s.Disk.locate(spec, s.Account.Proj, s.Account.Prog, s.priv(), true)
+			if locErr == nil {
+				if err := s.Disk.checkAccess(real, proj, prog, s.Account.Proj, s.Account.Prog, s.priv(), accRead); err != nil {
+					return err
+				}
+			}
+		}
+	}
 	var f *os.File
 	switch mode {
 	case "INPUT":
@@ -928,7 +1370,10 @@ func (s *Shell) openDiskFile(m *Machine, channel int, spec FileSpec, mode string
 	if err != nil {
 		return err
 	}
-	cf := &chanFile{file: f, mode: mode, class: devDisk}
+	cf := &chanFile{file: f, path: real, mode: mode, class: devDisk}
+	if m.openModeN&modeTentative != 0 {
+		cf.tentative = true
+	}
 	if mode == "INPUT" {
 		cf.r = bufio.NewReader(f)
 	}
@@ -1058,6 +1503,9 @@ func (s *Shell) Dispatch(raw string) {
 	}
 	verb, rest := splitVerb(stripped)
 	if err := s.dispatchCmd(verb, rest); err == errNotCmd {
+		if s.runCCL(verb, rest) {
+			return
+		}
 		if err := s.Basic.ExecImmediate(stripped); err != nil {
 			fmt.Fprintln(s.out, err.Error())
 		}
@@ -1085,6 +1533,24 @@ func (s *Shell) dispatchCmd(verb, rest string) error {
 		return s.cmdCopy(rest)
 	case "PIP":
 		return s.cmdPip(rest)
+	case "PLEASE", "OPR":
+		return s.cmdPlease(rest)
+	case "QUE":
+		return s.cmdQue(rest)
+	case "QUMRUN":
+		return s.cmdQumrun(rest)
+	case "BACKUP", "BCK":
+		return s.cmdBackup(rest)
+	case "SUBMIT", "BATCH":
+		return s.cmdSubmit(rest)
+	case "QUOLST", "QUOTA":
+		return s.cmdQuolst(rest)
+	case "SHUTUP":
+		return s.cmdShutup(rest)
+	case "UTILITY":
+		return s.cmdUtility(rest)
+	case "CCL":
+		return s.cmdCCL(rest)
 	case "KILL", "UNSAVE":
 		return s.cmdKill(rest)
 	case "NAME":
@@ -1217,15 +1683,17 @@ var keyboardCmds = []string{
 	"HELLO", "LOGIN", "BYE", "LOGOUT", "EXIT", "QUIT",
 	"HELP", "HLP",
 	"DIR", "CAT", "CATALOG",
-	"TYPE", "COPY", "PIP", "KILL", "UNSAVE", "NAME", "RENAME",
+	"TYPE", "COPY", "PIP", "PLEASE", "OPR", "KILL", "UNSAVE", "NAME", "RENAME",
+	"QUE", "QUMRUN", "CCL", "SUBMIT", "BATCH", "QUOLST", "QUOTA", "SHUTUP", "UTILITY",
 	"NEW", "OLD", "SAVE", "REPLACE", "COMPILE", "COMPIL",
 	"LIST", "LISTNH", "RUN", "RUNNH", "DELETE", "DEL", "CLEAR",
 	"SYSTAT", "SYS", "WHO",
 	"MOUNT", "DISMOUNT", "DSKINT", "INITIALIZE", "UMOUNT",
-	"DETACH", "ATTACH", "FORCE", "HANGUP", "BROADCAST", "SEND", "TALK",
+	"DETACH", "ATTACH", "FORCE", "HANGUP", "BROADCAST", "SEND", "TALK", "PLEASE", "OPR",
 	"CPU", "HARDWARE", "DATE", "TIME", "DAYTIME",
 	"PASSWORD", "CREATE", "REACT", "ACCOUNT", "SHOW", "REMOVE",
 	"CONT", "SET", "TTYSET", "ASSIGN", "DEASSIGN",
+	"BACKUP", "BCK",
 	"RENUM", "RENUMBER", "RESEQ", "RESEQUENCE",
 	"EDIT", "VTEDIT",
 }
@@ -1240,6 +1708,9 @@ var cmdSynonym = map[string]string{
 	"CATALOG":    "CAT",
 	"CONTINUE":   "CONT",
 	"TTYSET":     "SET",
+	"BATCH":      "SUBMIT",
+	"QUOTA":      "QUOLST",
+	"BCK":        "BACKUP",
 }
 
 func matchCmd(verb string) string {
@@ -1505,53 +1976,135 @@ func (s *Shell) cmdSet(rest string) error {
 	}
 	fields := strings.Fields(strings.ToUpper(rest))
 	if len(fields) == 0 {
-		fmt.Fprintf(s.out, "WIDTH %d\n", s.width)
-		if s.echo {
-			fmt.Fprintln(s.out, "ECHO")
-		} else {
-			fmt.Fprintln(s.out, "NOECHO")
-		}
+		s.showTTY()
 		return nil
 	}
 	i := 0
 	if fields[0] == "TERMINAL" || fields[0] == "TT" {
 		i = 1
 		if i >= len(fields) {
-			fmt.Fprintln(s.out, "?SET WIDTH n  or  SET ECHO / NOECHO")
+			s.showTTY()
 			return nil
 		}
 	}
-	switch fields[i] {
-	case "WIDTH":
-		if i+1 >= len(fields) {
-			fmt.Fprintln(s.out, "?SET WIDTH n")
+	for i < len(fields) {
+		sw := fields[i]
+		i++
+		switch sw {
+		case "WIDTH":
+			if i >= len(fields) {
+				fmt.Fprintln(s.out, "?SET WIDTH n")
+				return nil
+			}
+			n, err := strconv.Atoi(fields[i])
+			i++
+			if err != nil || n < 0 || n > 255 {
+				return fsErr("Illegal number")
+			}
+			s.width = n
+			if s.Basic != nil {
+				s.Basic.IO.Width = n
+			}
+		case "ECHO":
+			s.echo = true
+			if s.Basic != nil {
+				s.Basic.IO.Echo = true
+			}
+		case "NOECHO":
+			s.echo = false
+			if s.Basic != nil {
+				s.Basic.IO.Echo = false
+			}
+		case "SCOPE":
+			s.scope = true
+		case "NOSCOPE":
+			s.scope = false
+		case "TAB":
+			s.tab = true
+		case "NOTAB":
+			s.tab = false
+		case "FORM":
+			s.form = true
+		case "NOFORM":
+			s.form = false
+		case "FILL":
+			if i >= len(fields) {
+				fmt.Fprintln(s.out, "?SET FILL n")
+				return nil
+			}
+			n, err := strconv.Atoi(fields[i])
+			i++
+			if err != nil || n < 0 || n > 255 {
+				return fsErr("Illegal number")
+			}
+			s.fill = n
+		case "GAG":
+			s.gag = true
+		case "NOGAG":
+			s.gag = false
+		case "SPEED":
+			if i >= len(fields) {
+				fmt.Fprintln(s.out, "?SET SPEED n")
+				return nil
+			}
+			n, err := strconv.Atoi(fields[i])
+			i++
+			if err != nil || n < 0 {
+				return fsErr("Illegal number")
+			}
+			if _, ok := canonicalBaud(n); !ok && n != 0 {
+				return fsErr("Illegal number")
+			}
+			s.speed = n
+			if s.Basic != nil {
+				s.Basic.IO.Speed = n
+			}
+		case "TYPE":
+			if i >= len(fields) {
+				fmt.Fprintln(s.out, "?SET TYPE name")
+				return nil
+			}
+			s.ttype = fields[i]
+			i++
+			if s.Basic != nil {
+				s.Basic.IO.TermType = s.ttype
+			}
+		default:
+			fmt.Fprintln(s.out, "?SET WIDTH n  ECHO  SCOPE  TAB  FORM  FILL n  GAG  SPEED n  TYPE name")
 			return nil
 		}
-		n, err := strconv.Atoi(fields[i+1])
-		if err != nil || n < 0 || n > 255 {
-			return fsErr("Illegal number")
-		}
-		s.width = n
-		if s.Basic != nil {
-			s.Basic.IO.Width = n
-		}
-		s.applyTermSettings()
-	case "ECHO":
-		s.echo = true
-		if s.Basic != nil {
-			s.Basic.IO.Echo = true
-		}
-		s.applyTermSettings()
-	case "NOECHO":
-		s.echo = false
-		if s.Basic != nil {
-			s.Basic.IO.Echo = false
-		}
-		s.applyTermSettings()
-	default:
-		fmt.Fprintln(s.out, "?SET WIDTH n  or  SET ECHO / NOECHO")
 	}
+	s.applyTermSettings()
 	return nil
+}
+
+func (s *Shell) showTTY() {
+	echo := "NOECHO"
+	if s.echo {
+		echo = "ECHO"
+	}
+	scope := "NOSCOPE"
+	if s.scope {
+		scope = "SCOPE"
+	}
+	tab := "NOTAB"
+	if s.tab {
+		tab = "TAB"
+	}
+	form := "NOFORM"
+	if s.form {
+		form = "FORM"
+	}
+	gag := "NOGAG"
+	if s.gag {
+		gag = "GAG"
+	}
+	tt := s.ttype
+	if tt == "" {
+		tt = "UNKNOWN"
+	}
+	fmt.Fprintf(s.out, "WIDTH %d  %s  %s  %s  %s  FILL %d  %s  SPEED %d  TYPE %s\n",
+		s.width, echo, scope, tab, form, s.fill, gag, s.speed, tt)
 }
 
 func (s *Shell) applyTermSettings() {
@@ -1561,6 +2114,12 @@ func (s *Shell) applyTermSettings() {
 	if t, ok := s.term.(interface{ SetWidth(int) }); ok && s.width > 0 {
 		t.SetWidth(s.width)
 	}
+	if t, ok := s.term.(interface{ SetSpeed(int) error }); ok && s.speed > 0 {
+		_ = t.SetSpeed(s.speed)
+	}
+	if t, ok := s.term.(interface{ SetTTY(bool, bool, int) }); ok {
+		t.SetTTY(s.tab, s.form, s.fill)
+	}
 }
 
 func (s *Shell) cmdHello(rest string) {
@@ -1568,7 +2127,8 @@ func (s *Shell) cmdHello(rest string) {
 		fmt.Fprintln(s.out, "?Already logged in -- type BYE first")
 		return
 	}
-	token := strings.TrimSpace(rest)
+	sw, token := parseCmdSwitches(rest)
+	detach := switchOn(sw, "DETACH")
 	if token == "" {
 		var err error
 		token, err = s.readLine("Account or Name: ")
@@ -1582,6 +2142,9 @@ func (s *Shell) cmdHello(rest string) {
 		return
 	}
 	s.Login(token, pw)
+	if detach && s.Account != nil {
+		s.cmdDetach()
+	}
 }
 
 func (s *Shell) Login(token, password string) {
@@ -1597,12 +2160,28 @@ func (s *Shell) Login(token, password string) {
 		fmt.Fprintln(s.out, "?Invalid entry -- try again")
 		return
 	}
+	if s.sys != nil {
+		s.sys.mu.Lock()
+		blocked := s.sys.noLogins && !s.console
+		s.sys.mu.Unlock()
+		if blocked {
+			fmt.Fprintln(s.out, "?Logins are disabled")
+			return
+		}
+	}
+	if s.sys != nil && acct.JobQuota > 0 {
+		if n := len(s.sys.jobsForPPN(acct.Proj, acct.Prog)); n >= acct.JobQuota {
+			fmt.Fprintln(s.out, "?Maximum users exceeded")
+			return
+		}
+	}
 	s.Account = acct
 	s.tempPriv = false
 	s.Basic.IO.PPN = acct.Display()
 	s.Basic.IO.AccountName = acct.Name
 	s.Basic.IO.Privileged = s.accountPriv()
 	s.Basic.IO.Job = s.Job
+	s.Basic.IO.Quota = acct.Quota
 	if s.sys != nil {
 		s.sys.mu.Lock()
 		if j := s.sys.jobs[s.Job]; j != nil {
@@ -1693,6 +2272,13 @@ func (s *Shell) cmdBye(rest string) {
 	s.logicals = map[string]string{}
 	s.echo = true
 	s.width = 80
+	s.scope = true
+	s.tab = true
+	s.form = true
+	s.fill = 0
+	s.gag = false
+	s.speed = 9600
+	s.ttype = ""
 	if s.Basic != nil {
 		s.Basic.IO.Echo = true
 		s.Basic.IO.Width = 80
@@ -1756,14 +2342,15 @@ var helpAlias = map[string]string{
 	"SET": "SET", "TTYSET": "SET", "ECHO": "SET", "WIDTH": "SET",
 	"SYS": "SYSTAT", "WHO": "SYSTAT", "STATUS": "SYSTAT",
 	"TTY": "SERIAL", "RS232": "SERIAL", "MODEM": "SERIAL", "PORT": "SERIAL",
-	"CCL": "COMMANDS", "KEYBOARD": "JOBS", "KEYBOARDS": "JOBS",
+	"CCL": "CCL", "KEYBOARD": "JOBS", "KEYBOARDS": "JOBS",
 	"CMDS": "COMMANDS", "DCL": "COMMANDS",
 	"CPU": "HARDWARE", "PDP": "HARDWARE", "PDP11": "HARDWARE", "SWITCH": "HARDWARE",
 	"HLP":       "HELP",
 	"DIRECTORY": "FILES", "DIR": "FILES", "CAT": "FILES", "CATALOG": "FILES",
 	"TYPE": "FILES", "PIP": "FILES", "COPY": "FILES", "KILL": "FILES",
 	"NAME": "FILES", "UNSAVE": "FILES", "FILENAMES": "FILES", "FIT": "FILES",
-	"DIRECT": "FILES", "QUOLST": "DISKS", "QUOTA": "DISKS",
+	"DIRECT": "FILES", "QUOLST": "QUOLST", "QUOTA": "QUOLST",
+	"BACKUP": "FILES", "BCK": "FILES", "RESTORE": "FILES",
 	"HELLO": "LOGIN", "BYE": "LOGIN", "LOGOUT": "LOGIN", "EXIT": "LOGIN",
 	"PASSWORD": "ACCOUNTS", "REACT": "ACCOUNTS", "CREATE": "ACCOUNTS",
 	"NEW": "BASIC", "OLD": "BASIC", "SAVE": "BASIC", "RUN": "BASIC",
@@ -1774,7 +2361,8 @@ var helpAlias = map[string]string{
 	"DATE": "COMMANDS", "TIME": "COMMANDS", "DAYTIME": "COMMANDS",
 	"ADVANCED": "LANG", "STATEMENTS": "LANG", "FUNCTIONS": "FN",
 	"PLEASE": "PLEASE", "OPR": "PLEASE",
-	"QUE": "QUE", "QUEUE": "QUE", "QUMRUN": "QUE",
+	"QUE": "QUE", "QUEUE": "QUE", "QUMRUN": "QUE", "SUBMIT": "QUE", "BATCH": "QUE",
+	"SHUTUP": "JOBS", "UTILITY": "JOBS",
 	"TECO": "TECO", "VTEDIT": "EDIT", "EDITOR": "EDIT",
 }
 
@@ -1821,7 +2409,7 @@ func (s *Shell) cmdDir(rest string) error {
 	if err != nil {
 		return err
 	}
-	arg := rest
+	sw, arg := parseCmdSwitches(rest)
 	if arg == "" {
 		arg = "*.*"
 	}
@@ -1829,14 +2417,42 @@ func (s *Shell) cmdDir(rest string) error {
 	if err != nil {
 		return err
 	}
-	if spec.Name == "*" && rest == "" {
+	if spec.Name == "*" && arg == "*.*" {
 		spec.Ext = "*"
 	}
 	ppn, infos, err := s.Disk.ListDir(spec, acct.Proj, acct.Prog, s.priv())
 	if err != nil {
 		return err
 	}
-	fmt.Fprintln(s.out, FormatDir(spec.DevName(), ppn, infos))
+	header := !switchMin(sw, "NOHEADER", 1)
+	if switchMin(sw, "HEADER", 1) && !switchMin(sw, "NOHEADER", 1) {
+		header = true
+	}
+	dev := spec.DevName()
+	alloc := switchMin(sw, "ALLOCATION", 1)
+	cluster := switchMin(sw, "CLUSTER", 1)
+	switch {
+	case switchMin(sw, "SUMMARY", 2):
+		fmt.Fprintln(s.out, FormatDirCols(dev, ppn, infos, header, "SU"))
+	case switchMin(sw, "WIDE", 1) || switchMin(sw, "BRIEF", 1):
+		fmt.Fprintln(s.out, FormatDirWide(dev, ppn, infos, header))
+	case switchMin(sw, "SIZE", 1) && !switchMin(sw, "SUMMARY", 2) && !alloc && !cluster:
+		fmt.Fprintln(s.out, FormatDirCols(dev, ppn, infos, header, "S"))
+	case switchMin(sw, "PROTECTION", 1) && !alloc && !cluster && !switchMin(sw, "FULL", 1):
+		fmt.Fprintln(s.out, FormatDirCols(dev, ppn, infos, header, "P"))
+	case alloc && !cluster && !switchMin(sw, "FULL", 1) && !switchMin(sw, "SIZE", 1):
+		fmt.Fprintln(s.out, FormatDirCols(dev, ppn, infos, header, "A"))
+	case cluster && !alloc && !switchMin(sw, "FULL", 1) && !switchMin(sw, "SIZE", 1):
+		fmt.Fprintln(s.out, FormatDirCols(dev, ppn, infos, header, "C"))
+	case alloc && cluster:
+		fmt.Fprintln(s.out, FormatDirCols(dev, ppn, infos, header, "FAC"))
+	case alloc:
+		fmt.Fprintln(s.out, FormatDirCols(dev, ppn, infos, header, "FA"))
+	case cluster:
+		fmt.Fprintln(s.out, FormatDirCols(dev, ppn, infos, header, "FC"))
+	default:
+		fmt.Fprintln(s.out, FormatDirCols(dev, ppn, infos, header, "F"))
+	}
 	return nil
 }
 
@@ -1893,23 +2509,151 @@ func (s *Shell) cmdPip(rest string) error {
 	if err != nil {
 		return err
 	}
-	i := strings.IndexByte(rest, '=')
+	sw, arg := parseCmdSwitches(rest)
+	if switchMin(sw, "HELP", 2) {
+		fmt.Fprint(s.out, pipHelp)
+		return nil
+	}
+	goOn := switchMin(sw, "GO", 2)
+	run := func(err error) error {
+		if err == nil {
+			return nil
+		}
+		if goOn {
+			fmt.Fprintln(s.out, err.Error())
+			return nil
+		}
+		return err
+	}
+	switch {
+	case switchOn(sw, "DE", "DELETE"):
+		return run(s.pipDelete(arg, acct))
+	case switchOn(sw, "LI", "LIST", "DI", "DIR", "WI", "WIDE", "BR", "BRIEF"):
+		return s.cmdDir(rest)
+	case switchOn(sw, "RE", "RENAME"):
+		return run(s.pipRename(arg, acct))
+	}
+	i := strings.IndexByte(arg, '=')
 	if i < 0 {
 		fmt.Fprintln(s.out, "?PIP dst=src")
 		return nil
 	}
-	dst, err := s.parseSpec(strings.TrimSpace(rest[:i]), "")
-	if err != nil {
-		return err
+	dstArg := strings.TrimSpace(arg[:i])
+	srcArg := strings.TrimSpace(arg[i+1:])
+	if switchOn(sw, "CO", "CONCAT") || strings.Contains(srcArg, ",") {
+		return run(s.pipConcat(dstArg, srcArg, acct))
 	}
-	src, err := s.parseSpec(strings.TrimSpace(rest[i+1:]), "")
+	dst, err := s.parseSpec(dstArg, "")
 	if err != nil {
-		return err
+		return run(err)
+	}
+	src, err := s.parseSpec(srcArg, "")
+	if err != nil {
+		return run(err)
 	}
 	if dst.Ext == "" {
 		dst.Ext = src.Ext
 	}
-	return s.Disk.Copy(src, dst, acct.Proj, acct.Prog, s.priv())
+	if v := switchValue(sw, "PROT", "PROTECTION"); v != "" {
+		n, err := strconv.Atoi(v)
+		if err != nil || n < 0 || n > 255 {
+			return run(fsErr("Illegal protection code"))
+		}
+		dst.Prot, dst.ProtSet = n, true
+	}
+	appendTo := switchMin(sw, "APPEND", 2)
+	// /NE is not a prefix of NOSUPERSEDE (that word starts with NO).
+	noSuper := switchOn(sw, "NE", "NOSUPERSEDE")
+	return run(s.Disk.copyFile(src, dst, acct.Proj, acct.Prog, s.priv(), appendTo, noSuper))
+}
+
+const pipHelp = `PIP dst=src [/AP] [/NE] [/PROT:n] [/GO]
+PIP/DE filespec             delete
+PIP/LI filespec             list (same as DIR)
+PIP/DI filespec             same as /LI
+PIP/WI  PIP/BR              wide / brief list
+PIP/RE new=old              rename
+PIP dst=src1,src2           concatenate
+PIP/AP dst=src              append copy
+PIP/NE dst=src              no supersede
+PIP/PROT:n dst=src          set destination protection
+PIP/GO                      continue after errors
+PIP/RW  PIP/DEN             magtape (accepted)
+`
+
+func (s *Shell) pipDelete(arg string, acct *Account) error {
+	if strings.TrimSpace(arg) == "" {
+		fmt.Fprintln(s.out, "?PIP/DE filespec")
+		return nil
+	}
+	spec, err := s.parseSpec(arg, "")
+	if err != nil {
+		return err
+	}
+	if spec.Wildcard || spec.Name == "*" || strings.ContainsAny(spec.Name, "*?") || strings.ContainsAny(spec.Ext, "*?") {
+		ppn, infos, err := s.Disk.ListDir(spec, acct.Proj, acct.Prog, s.priv())
+		_ = ppn
+		if err != nil {
+			return err
+		}
+		for _, info := range infos {
+			one, err := s.parseSpec(info.Name, "")
+			if err != nil {
+				continue
+			}
+			one.Device = spec.Device
+			one.Unit = spec.Unit
+			one.UnitSet = spec.UnitSet
+			one.Proj, one.Prog = spec.Proj, spec.Prog
+			if err := s.Disk.Delete(one, acct.Proj, acct.Prog, s.priv()); err != nil {
+				fmt.Fprintln(s.out, err.Error())
+			}
+		}
+		return nil
+	}
+	return s.Disk.Delete(spec, acct.Proj, acct.Prog, s.priv())
+}
+
+func (s *Shell) pipRename(arg string, acct *Account) error {
+	i := strings.IndexByte(arg, '=')
+	if i < 0 {
+		fmt.Fprintln(s.out, "?PIP/RE new=old")
+		return nil
+	}
+	dst, err := s.parseSpec(strings.TrimSpace(arg[:i]), "BAS")
+	if err != nil {
+		return err
+	}
+	src, err := s.parseSpec(strings.TrimSpace(arg[i+1:]), "BAS")
+	if err != nil {
+		return err
+	}
+	return s.Disk.Rename(src, dst, acct.Proj, acct.Prog, s.priv())
+}
+
+func (s *Shell) pipConcat(dstArg, srcArg string, acct *Account) error {
+	parts := strings.Split(srcArg, ",")
+	var body strings.Builder
+	var ext string
+	for _, p := range parts {
+		src, err := s.parseSpec(strings.TrimSpace(p), "")
+		if err != nil {
+			return err
+		}
+		if ext == "" {
+			ext = src.Ext
+		}
+		text, err := s.Disk.ReadText(src, acct.Proj, acct.Prog, s.priv())
+		if err != nil {
+			return err
+		}
+		body.WriteString(text)
+	}
+	dst, err := s.parseSpec(dstArg, ext)
+	if err != nil {
+		return err
+	}
+	return s.Disk.WriteText(dst, acct.Proj, acct.Prog, s.priv(), body.String(), defaultProt)
 }
 
 func (s *Shell) cmdKill(rest string) error {
@@ -1976,6 +2720,12 @@ func (s *Shell) cmdEdit(rest string) error {
 	raw, ok := s.term.(rawTerm)
 	if !ok {
 		return fsErr("Not a terminal")
+	}
+	if !s.scope {
+		return fsErr("Not a scope terminal")
+	}
+	if s.ttype != "" {
+		raw = overrideTerm{rawTerm: raw, kind: s.ttype}
 	}
 	name := strings.TrimSpace(rest)
 
@@ -2591,8 +3341,12 @@ func (s *Shell) cmdReact(rest string) error {
 		return s.cmdPassword(arg)
 	case "LIST", "DIR", "":
 		return s.cmdShowAccounts()
+	case "QUOTA":
+		return s.cmdSetQuota(arg, true, false)
+	case "JOBQUOTA", "JOB":
+		return s.cmdSetQuota(arg, false, true)
 	default:
-		fmt.Fprintln(s.out, "?REACT CREATE, DELETE, PASSWORD, or LIST")
+		fmt.Fprintln(s.out, "?REACT CREATE, DELETE, PASSWORD, LIST, QUOTA, or JOBQUOTA")
 		return nil
 	}
 }
@@ -2830,12 +3584,11 @@ func parseLineRange(text string) (start, end int, hasStart, hasEnd bool) {
 	return n, 0, true, false
 }
 
+// Main is the rsts command: flags, config.toml, then the console and
+// optional Telnet/serial lines. Returns a process exit status.
 func Main(args []string) int {
-	disk := os.Getenv("RSTS_DISK")
-	if disk == "" {
-		wd, _ := os.Getwd()
-		disk = filepath.Join(wd, "disk")
-	}
+	envDisk := os.Getenv("RSTS_DISK")
+	diskFlag := ""
 	configPath := ""
 	login := ""
 	guest := false
@@ -2847,7 +3600,7 @@ func Main(args []string) int {
 		case "--disk":
 			if i+1 < len(args) {
 				i++
-				disk = args[i]
+				diskFlag = args[i]
 			}
 		case "--config":
 			if i+1 < len(args) {
@@ -2890,8 +3643,9 @@ Usage: rsts [options]
   --no-telnet     local console only
   --version       print version
 
-config.toml keys: max_users (25), telnet_port (23), telnet_bind,
-                  telnet, console
+config.toml keys (defaults and unused stay commented in the file):
+  max_users (25)  telnet_port (23)  telnet_bind  telnet  console
+  serial  disk  guest  login
 `)
 			return 0
 		}
@@ -2900,6 +3654,17 @@ config.toml keys: max_users (25), telnet_port (23), telnet_bind,
 	if err != nil {
 		fmt.Fprintln(os.Stderr, err)
 		return 1
+	}
+	disk := diskFlag
+	if disk == "" {
+		disk = envDisk
+	}
+	if disk == "" {
+		disk = cfg.Disk
+	}
+	if disk == "" {
+		wd, _ := os.Getwd()
+		disk = filepath.Join(wd, "disk")
 	}
 	if portOverride >= 0 {
 		cfg.TelnetPort = portOverride
@@ -2911,6 +3676,13 @@ config.toml keys: max_users (25), telnet_port (23), telnet_bind,
 	if noTelnet {
 		cfg.Telnet = false
 	}
+	if guest {
+		cfg.Guest = true
+	}
+	if login == "" {
+		login = cfg.Login
+	}
+	guest = cfg.Guest
 	if !cfg.Console && !cfg.Telnet && len(cfg.Serial) == 0 {
 		fmt.Fprintln(os.Stderr, "Nothing to run: console, telnet and serial are all off")
 		return 1

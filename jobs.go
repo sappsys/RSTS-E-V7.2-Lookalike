@@ -243,6 +243,9 @@ func (sys *System) Broadcast(token, from, text string) error {
 		}
 		sys.mu.Unlock()
 		for _, sh := range shells {
+			if sh == nil || sh.gag {
+				continue
+			}
 			fmt.Fprint(sh.out, msg)
 		}
 		return nil

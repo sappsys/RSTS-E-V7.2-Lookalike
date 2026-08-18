@@ -17,6 +17,9 @@ telnet_port = 2323
 telnet_bind = "127.0.0.1"
 telnet = false
 console = yes
+disk = "./pack"
+guest = true
+login = "GUEST"
 `
 	if err := parseTOML(src, &cfg); err != nil {
 		t.Fatal(err)
@@ -26,6 +29,9 @@ console = yes
 	}
 	if cfg.Telnet || !cfg.Console {
 		t.Fatalf("bools %+v", cfg)
+	}
+	if cfg.Disk != "./pack" || !cfg.Guest || cfg.Login != "GUEST" {
+		t.Fatalf("login %+v", cfg)
 	}
 }
 
@@ -190,7 +196,7 @@ func TestSystatAndPK(t *testing.T) {
 		gotCh := make(chan string, 1)
 		errCh := make(chan error, 1)
 		go func() {
-			line, err := f.pk.ctrlReadLine()
+			line, err := f.pk.ctrlReadLine(nil)
 			if err != nil {
 				errCh <- err
 				return

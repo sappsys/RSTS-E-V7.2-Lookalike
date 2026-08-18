@@ -1,3 +1,4 @@
+// Command rsts is the RSTS/E V7.2 lookalike timesharing CLI.
 package main
 
 import (

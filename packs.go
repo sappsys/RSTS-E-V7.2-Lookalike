@@ -356,11 +356,21 @@ func (d *Disk) PackUsage(p *Pack) (capacity, used int) {
 			if err != nil {
 				continue
 			}
-			blocks := int((info.Size() + blockSize - 1) / blockSize)
-			if blocks == 0 {
-				blocks = 1
+			folder := filepath.Join(root, acct.Name())
+			index := d.loadIndex(folder)
+			meta := index[f.Name()]
+			if meta.Prot == 0 {
+				meta = index[strings.ToUpper(f.Name())]
 			}
-			used += ((blocks + cluster - 1) / cluster) * cluster
+			cs := meta.Cluster
+			if cs < 1 {
+				cs = cluster
+			}
+			n := fileBlocks(info.Size(), cs, meta.Alloc)
+			if n == 0 {
+				n = cs
+			}
+			used += n
 		}
 	}
 	if used > capacity {

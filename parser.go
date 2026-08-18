@@ -76,6 +76,12 @@ const (
 	stSleep
 	stKill
 	stName
+	stExtend
+	stCommon
+	stWait
+	stUnlock
+	stMid
+	stScale
 )
 
 type printItem struct {
@@ -171,6 +177,9 @@ type stmt struct {
 	org       string
 	mapName   string
 	mapFields []mapField
+	modeN     expr
+	clusSize  expr
+	fileSize  expr
 }
 
 type parser struct {
@@ -178,27 +187,40 @@ type parser struct {
 	i       int
 	markRef bool
 	refs    []int // byte offsets of line numbers used as references
+	extend  bool
 }
 
-func parseSourceLine(text string) ([]stmt, error) {
+func parseSourceLine(text string, extend bool) ([]stmt, error) {
 	toks, err := tokenize(text)
 	if err != nil {
 		return nil, err
 	}
-	p := parser{tokens: toks}
+	p := parser{tokens: toks, extend: extend}
 	return p.parseLine()
+}
+
+// applyExtendMode returns the EXTEND state after executing stmts in order.
+// Default is NOEXTEND; a later EXTEND on the same line (NOEXTEND \ EXTEND)
+// restores long names for statements that follow.
+func applyExtendMode(extend bool, stmts []stmt) bool {
+	for _, s := range stmts {
+		if s.kind == stExtend {
+			extend = s.fromName != "NOEXTEND"
+		}
+	}
+	return extend
 }
 
 // lineRefOffsets returns where in the text each line number reference
 // begins: the targets of GOTO, GOSUB, ON ... GOTO/GOSUB, THEN, ELSE,
-// RESUME and ON ERROR GOTO. RENUM rewrites exactly these, which is why it
-// asks the grammar rather than guessing at the text.
+// RESUME, RESTORE, ON ERROR GOTO, and CHAIN LINE. RENUM rewrites exactly
+// these, which is why it asks the grammar rather than guessing at the text.
 func lineRefOffsets(text string) ([]int, error) {
 	toks, err := tokenize(text)
 	if err != nil {
 		return nil, err
 	}
-	p := parser{tokens: toks, markRef: true}
+	p := parser{tokens: toks, markRef: true, extend: true}
 	if _, err := p.parseLine(); err != nil {
 		return nil, err
 	}
@@ -338,8 +360,7 @@ func (p *parser) parseBareStatement() (stmt, error) {
 		case "READ":
 			return p.parseRead()
 		case "RESTORE":
-			p.i++
-			return stmt{kind: stRestore}, nil
+			return p.parseRestore()
 		case "END":
 			p.i++
 			return stmt{kind: stEnd}, nil
@@ -390,6 +411,19 @@ func (p *parser) parseBareStatement() (stmt, error) {
 			return p.parseKill()
 		case "NAME":
 			return p.parseName()
+		case "EXTEND", "NOEXTEND":
+			kw := p.tok().text
+			p.i++
+			p.extend = kw != "NOEXTEND"
+			return stmt{kind: stExtend, fromName: kw}, nil
+		case "COMMON":
+			return p.parseCommon()
+		case "WAIT":
+			return p.parseWait()
+		case "UNLOCK":
+			return p.parseUnlock()
+		case "SCALE":
+			return p.parseScale()
 		default:
 			return stmt{}, basicErr("Syntax error")
 		}
@@ -406,11 +440,12 @@ func (p *parser) atStop() bool {
 }
 
 func (p *parser) openClause() bool {
-	if p.tok().kind != tokKeyword {
+	t := p.tok()
+	if t.kind != tokKeyword && t.kind != tokIdent {
 		return false
 	}
-	switch p.tok().text {
-	case "RECORDSIZE", "ORGANIZATION", "MAP":
+	switch t.text {
+	case "RECORDSIZE", "ORGANIZATION", "MAP", "MODE", "CLUSTERSIZE", "FILESIZE":
 		return true
 	}
 	return false
@@ -589,6 +624,9 @@ func (p *parser) parseLineInput() (stmt, error) {
 }
 
 func (p *parser) parseAssignment() (stmt, error) {
+	if p.tok().kind == tokIdent && p.tok().text == "MID$" && p.peek().kind == tokLParen {
+		return p.parseMidAssign()
+	}
 	v, err := p.parseVarRef()
 	if err != nil {
 		return stmt{}, err
@@ -603,9 +641,55 @@ func (p *parser) parseAssignment() (stmt, error) {
 	return stmt{kind: stLet, target: v, expr: e}, nil
 }
 
+func (p *parser) parseMidAssign() (stmt, error) {
+	if err := p.expectKind(tokIdent); err != nil {
+		return stmt{}, err
+	}
+	if err := p.expectKind(tokLParen); err != nil {
+		return stmt{}, err
+	}
+	v, err := p.parseVarRef()
+	if err != nil {
+		return stmt{}, err
+	}
+	if !strings.HasSuffix(v.name, "$") {
+		return stmt{}, basicErr("Type mismatch")
+	}
+	if err := p.expectKind(tokComma); err != nil {
+		return stmt{}, err
+	}
+	start, err := p.parseExpr()
+	if err != nil {
+		return stmt{}, err
+	}
+	s := stmt{kind: stMid, target: v, start: start}
+	if p.acceptKind(tokComma) {
+		ln, err := p.parseExpr()
+		if err != nil {
+			return stmt{}, err
+		}
+		s.end = ln
+	}
+	if err := p.expectKind(tokRParen); err != nil {
+		return stmt{}, err
+	}
+	if err := p.expectOp("="); err != nil {
+		return stmt{}, err
+	}
+	e, err := p.parseExpr()
+	if err != nil {
+		return stmt{}, err
+	}
+	s.expr = e
+	return s, nil
+}
+
 func (p *parser) parseIf() (stmt, error) {
 	if err := p.expectKw("IF"); err != nil {
 		return stmt{}, err
+	}
+	if p.acceptKw("END") {
+		return p.parseIfEnd()
 	}
 	cond, err := p.parseExpr()
 	if err != nil {
@@ -619,6 +703,30 @@ func (p *parser) parseIf() (stmt, error) {
 		return stmt{}, err
 	}
 	s := stmt{kind: stIf, cond: cond, thenPart: thenPart}
+	if p.acceptKw("ELSE") {
+		elsePart, err := p.parseBranch(false)
+		if err != nil {
+			return stmt{}, err
+		}
+		s.elsePart = elsePart
+	}
+	return s, nil
+}
+
+func (p *parser) parseIfEnd() (stmt, error) {
+	p.acceptKind(tokHash)
+	ch, err := p.parseExpr()
+	if err != nil {
+		return stmt{}, err
+	}
+	if err := p.expectKw("THEN"); err != nil {
+		return stmt{}, err
+	}
+	thenPart, err := p.parseBranch(true)
+	if err != nil {
+		return stmt{}, err
+	}
+	s := stmt{kind: stIf, hasChan: true, channel: ch, thenPart: thenPart}
 	if p.acceptKw("ELSE") {
 		elsePart, err := p.parseBranch(false)
 		if err != nil {
@@ -822,6 +930,20 @@ func (p *parser) parseData() (stmt, error) {
 	return s, nil
 }
 
+func (p *parser) parseRestore() (stmt, error) {
+	if err := p.expectKw("RESTORE"); err != nil {
+		return stmt{}, err
+	}
+	if p.atStop() || p.modifierStart() {
+		return stmt{kind: stRestore}, nil
+	}
+	n, err := p.lineRef()
+	if err != nil {
+		return stmt{}, err
+	}
+	return stmt{kind: stRestore, expr: n}, nil
+}
+
 func (p *parser) parseRead() (stmt, error) {
 	if err := p.expectKw("READ"); err != nil {
 		return stmt{}, err
@@ -898,6 +1020,24 @@ func (p *parser) parseOpen() (stmt, error) {
 				return stmt{}, err
 			}
 			s.mapName = name
+		case p.acceptName("MODE"):
+			n, err := p.parseExpr()
+			if err != nil {
+				return stmt{}, err
+			}
+			s.modeN = n
+		case p.acceptName("CLUSTERSIZE"):
+			n, err := p.parseExpr()
+			if err != nil {
+				return stmt{}, err
+			}
+			s.clusSize = n
+		case p.acceptName("FILESIZE"):
+			n, err := p.parseExpr()
+			if err != nil {
+				return stmt{}, err
+			}
+			s.fileSize = n
 		default:
 			return stmt{}, basicErr("Syntax error")
 		}
@@ -1044,13 +1184,52 @@ func (p *parser) lineRef() (expr, error) {
 	return p.parseExpr()
 }
 
-func (p *parser) identName() (string, error) {
+// identRaw consumes an identifier without EXTEND/NOEXTEND rules.
+// MAT ZER/CON/IDN/TRN/INV use this because they are verbs, not names.
+func (p *parser) identRaw() (string, error) {
 	if p.tok().kind != tokIdent {
 		return "", basicErr("Syntax error")
 	}
 	name := p.tok().text
 	p.i++
 	return name, nil
+}
+
+func (p *parser) identName() (string, error) {
+	name, err := p.identRaw()
+	if err != nil {
+		return "", err
+	}
+	if err := p.checkIdent(name); err != nil {
+		return "", err
+	}
+	return name, nil
+}
+
+// checkIdent enforces V7 name rules. NOEXTEND is one letter plus optional
+// $ or % (and FN plus one letter: FNA, FNR$). EXTEND allows up to 29
+// characters after the type suffix is stripped. Built-ins are exempt.
+func (p *parser) checkIdent(name string) error {
+	n := name
+	if strings.HasSuffix(n, "$") || strings.HasSuffix(n, "%") {
+		n = n[:len(n)-1]
+	}
+	if p.extend {
+		if len(n) == 0 || len(n) > 29 {
+			return basicErr("Syntax error")
+		}
+		return nil
+	}
+	if builtins[name] {
+		return nil
+	}
+	if strings.HasPrefix(n, "FN") {
+		n = n[2:]
+	}
+	if len(n) != 1 || n[0] < 'A' || n[0] > 'Z' {
+		return basicErr("Syntax error")
+	}
+	return nil
 }
 
 func (p *parser) parseVarRef() (*varRef, error) {
@@ -1290,12 +1469,23 @@ func (p *parser) parsePrimary() (expr, error) {
 				return nil, err
 			}
 			if builtins[name] || stringsHasPrefix(name, "FN") {
+				if stringsHasPrefix(name, "FN") {
+					if err := p.checkIdent(name); err != nil {
+						return nil, err
+					}
+				}
 				return callExpr{name: name, args: args}, nil
+			}
+			if err := p.checkIdent(name); err != nil {
+				return nil, err
 			}
 			return varRef{name: name, indices: args}, nil
 		}
 		if name == "DATE$" || name == "TIME$" || name == "DATE" || name == "TIME" || name == "PI" || builtins[name] {
 			return callExpr{name: name}, nil
+		}
+		if err := p.checkIdent(name); err != nil {
+			return nil, err
 		}
 		return varRef{name: name}, nil
 	}
@@ -1547,7 +1737,7 @@ func (p *parser) parseMat() (stmt, error) {
 		s.matLeft = src
 		return s, nil
 	}
-	name, err := p.identName()
+	name, err := p.identRaw()
 	if err != nil {
 		return stmt{}, err
 	}
@@ -1588,6 +1778,9 @@ func (p *parser) parseMat() (stmt, error) {
 		s.matKind = name
 		s.matLeft = src
 		return s, nil
+	}
+	if err := p.checkIdent(name); err != nil {
+		return stmt{}, err
 	}
 	if p.acceptOp("+") {
 		right, err := p.identName()
@@ -1688,7 +1881,7 @@ func (p *parser) parseChain() (stmt, error) {
 	}
 	s := stmt{kind: stChain, path: path}
 	if p.acceptKw("LINE") {
-		line, err := p.parseExpr()
+		line, err := p.lineRef()
 		if err != nil {
 			return stmt{}, err
 		}
@@ -1735,6 +1928,84 @@ func (p *parser) parseName() (stmt, error) {
 		return stmt{}, err
 	}
 	return stmt{kind: stName, fromExpr: old, expr: newp}, nil
+}
+
+func (p *parser) parseCommon() (stmt, error) {
+	if err := p.expectKw("COMMON"); err != nil {
+		return stmt{}, err
+	}
+	s := stmt{kind: stCommon}
+	for {
+		name, err := p.identName()
+		if err != nil {
+			return stmt{}, err
+		}
+		item := dimItem{name: name}
+		if p.acceptKind(tokLParen) {
+			b, err := p.parseExpr()
+			if err != nil {
+				return stmt{}, err
+			}
+			item.bounds = []expr{b}
+			for p.acceptKind(tokComma) {
+				b, err := p.parseExpr()
+				if err != nil {
+					return stmt{}, err
+				}
+				item.bounds = append(item.bounds, b)
+			}
+			if err := p.expectKind(tokRParen); err != nil {
+				return stmt{}, err
+			}
+			if strings.HasSuffix(name, "$") && p.acceptOp("=") {
+				ln, err := p.parseExpr()
+				if err != nil {
+					return stmt{}, err
+				}
+				item.strLen = ln
+			}
+		}
+		s.arrays = append(s.arrays, item)
+		if !p.acceptKind(tokComma) {
+			break
+		}
+	}
+	return s, nil
+}
+
+func (p *parser) parseWait() (stmt, error) {
+	if err := p.expectKw("WAIT"); err != nil {
+		return stmt{}, err
+	}
+	n, err := p.parseExpr()
+	if err != nil {
+		return stmt{}, err
+	}
+	return stmt{kind: stWait, expr: n}, nil
+}
+
+func (p *parser) parseUnlock() (stmt, error) {
+	if err := p.expectKw("UNLOCK"); err != nil {
+		return stmt{}, err
+	}
+	p.acceptKw("FILE")
+	p.acceptKind(tokHash)
+	ch, err := p.parseExpr()
+	if err != nil {
+		return stmt{}, err
+	}
+	return stmt{kind: stUnlock, channel: ch, hasChan: true}, nil
+}
+
+func (p *parser) parseScale() (stmt, error) {
+	if err := p.expectKw("SCALE"); err != nil {
+		return stmt{}, err
+	}
+	n, err := p.parseExpr()
+	if err != nil {
+		return stmt{}, err
+	}
+	return stmt{kind: stScale, expr: n}, nil
 }
 
 func (p *parser) parseMap() (stmt, error) {

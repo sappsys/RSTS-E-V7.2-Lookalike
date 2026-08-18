@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"strings"
 	"sync"
 	"time"
 )
@@ -15,6 +16,15 @@ import (
 
 const serialSpeed = "9600 8N1"
 
+func canonicalBaud(n int) (int, bool) {
+	switch n {
+	case 50, 75, 110, 134, 150, 200, 300, 600, 1200, 1800, 2400, 4800, 9600, 19200, 38400, 57600, 115200:
+		return n, true
+	default:
+		return 0, false
+	}
+}
+
 type serialTerm struct {
 	f       *os.File
 	mu      sync.Mutex
@@ -24,26 +34,72 @@ type serialTerm struct {
 	rows    int
 	pending []byte
 	skipNL  bool
+	discard bool
+	fill    int
+	tab     bool
+	form    bool
+	speed   int
 }
 
 func newSerialTerm(f *os.File) *serialTerm {
-	return &serialTerm{f: f, echo: true, cols: 80, rows: 24}
+	return &serialTerm{f: f, echo: true, cols: 80, rows: 24, tab: true, form: true, speed: 9600}
 }
 
 func (t *serialTerm) Write(p []byte) (int, error) {
+	return t.writeBytes(p, false)
+}
+
+func (t *serialTerm) writeEcho(p []byte) (int, error) {
+	return t.writeBytes(p, true)
+}
+
+func (t *serialTerm) toggleDiscard() {
+	t.mu.Lock()
+	t.discard = !t.discard
+	t.mu.Unlock()
+}
+
+func (t *serialTerm) writeBytes(p []byte, always bool) (int, error) {
 	if len(p) == 0 {
 		return 0, nil
+	}
+	t.mu.Lock()
+	fill := t.fill
+	tab := t.tab
+	form := t.form
+	t.mu.Unlock()
+	if !tab || !form {
+		s := string(p)
+		if !tab {
+			s = expandTabs(s, 8)
+		}
+		if !form {
+			s = strings.ReplaceAll(s, "\f", "")
+		}
+		p = []byte(s)
 	}
 	var out []byte
 	for i := 0; i < len(p); i++ {
 		if p[i] == '\n' && (i == 0 || p[i-1] != '\r') {
-			out = append(out, '\r', '\n')
+			out = append(out, '\r')
+			for n := 0; n < fill; n++ {
+				out = append(out, 0)
+			}
+			out = append(out, '\n')
 			continue
 		}
 		out = append(out, p[i])
+		if p[i] == '\r' && fill > 0 {
+			for n := 0; n < fill; n++ {
+				out = append(out, 0)
+			}
+		}
 	}
 	t.mu.Lock()
 	defer t.mu.Unlock()
+	if t.discard && !always {
+		return len(p), nil
+	}
 	if _, err := t.f.Write(out); err != nil {
 		return 0, err
 	}
@@ -88,19 +144,30 @@ func (t *serialTerm) ReadByte() (byte, error) {
 func (t *serialTerm) PollInterrupt() bool {
 	t.mu.Lock()
 	defer t.mu.Unlock()
-	for i, b := range t.pending {
-		if b == 3 {
-			t.pending = append(t.pending[:i], t.pending[i+1:]...)
-			return true
-		}
-	}
+	kept := t.pending[:0]
 	hit := false
+	for _, b := range t.pending {
+		if b == 3 {
+			hit = true
+			continue
+		}
+		if b == 15 {
+			t.discard = !t.discard
+			continue
+		}
+		kept = append(kept, b)
+	}
+	t.pending = kept
 	buf := make([]byte, 64)
 	for {
 		n, err := pollRead(t.f, buf)
 		for i := 0; i < n; i++ {
 			if buf[i] == 3 {
 				hit = true
+				continue
+			}
+			if buf[i] == 15 {
+				t.discard = !t.discard
 				continue
 			}
 			t.pending = append(t.pending, buf[i])
@@ -131,7 +198,7 @@ func (t *serialTerm) echoOn() bool {
 
 func (t *serialTerm) readEdit(prompt string, echo bool) (string, error) {
 	if prompt != "" {
-		if _, err := t.Write([]byte(prompt)); err != nil {
+		if _, err := t.writeEcho([]byte(prompt)); err != nil {
 			return "", err
 		}
 	}
@@ -162,12 +229,12 @@ func (t *serialTerm) readEdit(prompt string, echo bool) (string, error) {
 		case '\r':
 			t.skipNL = true
 			if echo {
-				_, _ = t.Write([]byte("\r\n"))
+				_, _ = t.writeEcho([]byte("\r\n"))
 			}
 			return string(buf), nil
 		case '\n':
 			if echo {
-				_, _ = t.Write([]byte("\r\n"))
+				_, _ = t.writeEcho([]byte("\r\n"))
 			}
 			return string(buf), nil
 		case 3:
@@ -176,19 +243,29 @@ func (t *serialTerm) readEdit(prompt string, echo bool) (string, error) {
 			if len(buf) == 0 {
 				return "", io.EOF
 			}
+		case 15: // Ctrl-O
+			t.toggleDiscard()
+		case 18: // Ctrl-R
+			_, _ = t.writeEcho([]byte("\r\n"))
+			if prompt != "" {
+				_, _ = t.writeEcho([]byte(prompt))
+			}
+			if len(buf) > 0 {
+				_, _ = t.writeEcho(buf)
+			}
 		case 21, 24: // Ctrl-U, kill the line
 			buf = buf[:0]
 			if echo {
-				_, _ = t.Write([]byte("^U\r\n"))
+				_, _ = t.writeEcho([]byte("^U\r\n"))
 				if prompt != "" {
-					_, _ = t.Write([]byte(prompt))
+					_, _ = t.writeEcho([]byte(prompt))
 				}
 			}
 		case 8, 127:
 			if len(buf) > 0 {
 				buf = buf[:len(buf)-1]
 				if echo {
-					_, _ = t.Write([]byte{8, ' ', 8})
+					_, _ = t.writeEcho([]byte{8, ' ', 8})
 				}
 			}
 		case 17, 19: // XON/XOFF
@@ -199,7 +276,7 @@ func (t *serialTerm) readEdit(prompt string, echo bool) (string, error) {
 			}
 			buf = append(buf, b)
 			if echo {
-				_, _ = t.Write([]byte{b})
+				_, _ = t.writeEcho([]byte{b})
 			}
 		}
 	}
@@ -233,6 +310,28 @@ func (t *serialTerm) Size() (int, int) {
 // VT52 on the far end still takes the cursor keys, which it sends as
 // ESC A through ESC D.
 func (t *serialTerm) TermType() string { return "" }
+
+func (t *serialTerm) SetTTY(tab, form bool, fill int) {
+	t.mu.Lock()
+	t.tab = tab
+	t.form = form
+	t.fill = fill
+	t.mu.Unlock()
+}
+
+func (t *serialTerm) SetSpeed(n int) error {
+	if n <= 0 {
+		return nil
+	}
+	t.mu.Lock()
+	t.speed = n
+	f := t.f
+	t.mu.Unlock()
+	if f == nil {
+		return nil
+	}
+	return setSerialSpeed(f, n)
+}
 
 func (t *serialTerm) StartRaw() error {
 	t.mu.Lock()

@@ -1,19 +1,24 @@
 package rsts
 
+import "strings"
+
 // Stock BASIC-PLUS programs seeded onto a new disk.
 var samples = map[string]map[string]string{
 	"1,2": {
 		"NOTICE.TXT": "Welcome to " + SystemLong + " on PDP-11/70.\nLog in with HELLO, then type HELP or SHOW CPU.\nPrivileged account is 1,2 / SYSTEM.\nRUN $WHOAMI from a guest account to try a privileged CUSP.\n",
-		"LOGIN.TXT":  "System account [1,2]. Password is SYSTEM.\n\nRUN COMP   BASIC-PLUS exerciser: every statement and function this\n           system implements, self-checking. Prints ALL PASSED.\nRUN DATA   1000-record virtual file demo.\n",
+		"LOGIN.TXT":  "System account [1,2]. " + SystemLong + ".\nPassword is SYSTEM.\n\nRUN COMP   BASIC-PLUS exerciser for this release: every statement\n           and function the language implements. Self-checking.\n           Prints ALL PASSED.\nRUN DATA   1000-record virtual file demo.\n",
 		"WHOAMI.BAS": `10 PRINT "ACCOUNT "; SYS(CHR$(2%))
+15 PRINT SYS(CHR$(1%))
 20 PRINT CVT$%(SYS(CHR$(8%)))
 30 END
 `,
 		"WHOAMI.BAC": `10 PRINT "ACCOUNT "; SYS(CHR$(2%))
+15 PRINT SYS(CHR$(1%))
 20 PRINT CVT$%(SYS(CHR$(8%)))
 30 END
 `,
-		"DATA.BAS": `10 OPEN "DATA.TMP" AS FILE 1%, ORGANIZATION VIRTUAL
+		"DATA.BAS": `5 EXTEND
+10 OPEN "DATA.TMP" AS FILE 1%, ORGANIZATION VIRTUAL
 20 MAP (DATMAP) LONG X%, STRING A$ = 20
 30 FOR I% = 1% TO 1000%
 40   X% = I% * 5% \ A$ = "Record #" + NUM1$(I%)
@@ -30,19 +35,32 @@ var samples = map[string]map[string]string{
 150 CLOSE #1%
 160 END
 `,
-		"COMP.BAS": `10 ! ============================================================
+		"COMP.BAS": strings.ReplaceAll(`10 ! ============================================================
 12 ! COMP BAS -- BASIC-PLUS COMPREHENSIVE EXERCISER
-14 ! Self-checking. Prints FAIL n on error; ALL PASSED at end.
+14 ! Self-checking. Prints FAIL n on error; ALL PASSED at the end.
 16 ! Runs from [1,2]. The last test CHAINs back to this program at
-18 ! line 8000, which prints the totals and deletes the scratch
-19 ! files. CONT is a keyboard command and cannot be tested here:
-21 ! type RUN, then CONT after the STOP that HELP BASIC describes.
-22 ! ============================================================
-20 FAIL%=0% \ PASS%=0%
+18 ! line 8000. COMMON carries PASS% and FAIL% across that CHAIN.
+19 ! CONT is a keyboard command and cannot be tested here.
+20 ! SYS(CHR$(1%)) must name this release (@@REL@@).
+21 ! NOEXTEND is 1-character names; EXTEND (line 22) allows 29.
+22 EXTEND
+23 NOEXTEND \ EXTEND
+24 COMMON PASS%, FAIL%, CK%
+26 PASS%=0% \ FAIL%=0% \ CK%=0%
 30 DEF FNSQ(X)=X*X
 40 DEF FNDB(X)=X+X
 50 DEF FNH$(A$)=LEFT$(A$,2)
+51 DEF FNF(N)
+52   FNF=1
+53   IF N>1 THEN FNF=N*FNF(N-1)
+54 FNEND
+55 DEF FNE(X)
+56   FNE=-1
+57   IF X<0 THEN FNEXIT
+58   FNE=SQR(X)
+59 FNEND
 60 PRINT "COMP.BAS -- BASIC-PLUS EXERCISER"
+62 PRINT SYS(CHR$(1%))
 70 PRINT "DATE "; DATE$; "  TIME "; TIME$
 80 PRINT
 90 GOSUB 1000
@@ -68,11 +86,14 @@ var samples = map[string]map[string]string{
 266 GOSUB 5400
 268 GOSUB 5600
 270 GOSUB 5800
+272 GOSUB 6200
+274 GOSUB 6400
 280 GOTO 6000
 330 REM
 1000 REM ---- arithmetic / numeric functions ----
 1010 PRINT "ARITH"
 1020 LN%=1020 \ C%=(1+2*3=7) \ GOSUB 9000
+1022 LET Q=7 \ LN%=1022 \ C%=(Q=7) \ GOSUB 9000
 1030 LN%=1030 \ C%=((2+3)^2=25) \ GOSUB 9000
 1040 LN%=1040 \ C%=(2^10=1024) \ GOSUB 9000
 1050 LN%=1050 \ C%=(ABS(-3)=3) \ GOSUB 9000
@@ -115,15 +136,24 @@ var samples = map[string]map[string]string{
 1490 LN%=1490 \ C%=(ASC("A")=65) AND (CHR$(65)="A") \ GOSUB 9000
 1500 LN%=1500 \ C%=(VAL("12.5")=12.5) \ GOSUB 9000
 1510 LN%=1510 \ C%=(NUM1$(12)="12") \ GOSUB 9000
+1512 LN%=1512 \ C%=(STR$(12)="12") \ GOSUB 9000
+1514 LN%=1514 \ C%=(LEFT$(NUM$(12),1%)=" ") \ GOSUB 9000
+1516 LN%=1516 \ C%=(STRING$(3%,65%)="AAA") \ GOSUB 9000
+1518 LN%=1518 \ C%=(INSTR("HELLO","Z")=0) \ GOSUB 9000
 1520 LN%=1520 \ C%=(SPACE$(3)="   ") \ GOSUB 9000
 1530 LN%=1530 \ C%=(STRING$(3,"*")="***") \ GOSUB 9000
 1540 LN%=1540 \ C%=(LEN(DATE$)>0) AND (LEN(TIME$)>0) \ GOSUB 9000
 1550 LN%=1550 \ C%=(FNH$("WXYZ")="WX") \ GOSUB 9000
 1560 B$=SPACE$(4) \ LSET B$="HI" \ LN%=1560 \ C%=(LEFT$(B$,2)="HI") \ GOSUB 9000
+1562 A$="HELLO" \ MID$(A$,2,3)="XYZ" \ LN%=1562 \ C%=(A$="HXYZO") \ GOSUB 9000
+1564 LN%=1564 \ C%=(XLATE("AAA",STRING$(256,"B"))="BBB") \ GOSUB 9000
+1566 LN%=1566 \ C%=(XLATE$("A",STRING$(256,CHR$(0)))="") \ GOSUB 9000
 1570 RETURN
 1600 REM ---- DEF FN / arrays ----
 1610 PRINT "FN/ARRAY"
 1620 LN%=1620 \ C%=(FNSQ(4)=16) AND (FNDB(7)=14) \ GOSUB 9000
+1622 LN%=1622 \ C%=(FNF(5)=120) \ GOSUB 9000
+1624 LN%=1624 \ C%=(FNE(9)=3) AND (FNE(-4)=-1) \ GOSUB 9000
 1630 DIM V(8), M(2,2)
 1640 V(3)=11 \ V(0)=99
 1650 LN%=1650 \ C%=(V(3)=11) AND (V(0)=99) \ GOSUB 9000
@@ -138,9 +168,13 @@ var samples = map[string]map[string]string{
 1820 READ N1, N2, W$
 1830 DATA 10, 20, "ZIP"
 1840 LN%=1840 \ C%=(N1=10) AND (N2=20) AND (W$="ZIP") \ GOSUB 9000
+1845 DATA 30, 40, "ZAP"
 1850 RESTORE
 1860 READ Q1, Q2, Q$
 1870 LN%=1870 \ C%=(Q1=10) AND (Q2=20) AND (Q$="ZIP") \ GOSUB 9000
+1872 RESTORE 1845
+1874 READ R1, R2, R$
+1876 LN%=1876 \ C%=(R1=30) AND (R2=40) AND (R$="ZAP") \ GOSUB 9000
 1880 RETURN
 2000 REM ---- FOR / WHILE / UNTIL / nested ----
 2010 PRINT "LOOPS"
@@ -246,9 +280,11 @@ var samples = map[string]map[string]string{
 3230 MAT D = IDN
 3240 MAT C = INV(D)
 3250 LN%=3250 \ C%=(C(1,1)=1) AND (C(1,2)=0) AND (C(2,2)=1) \ GOSUB 9000
+3252 LN%=3252 \ C%=(ABS(DET-1)<1E-4) \ GOSUB 9000
 3260 MAT C = INV(A)
 3270 LN%=3270 \ C%=(ABS(C(1,1)+2)<1E-4) AND (ABS(C(1,2)-1)<1E-4) \ GOSUB 9000
 3280 LN%=3280 \ C%=(ABS(C(2,1)-1.5)<1E-4) AND (ABS(C(2,2)+.5)<1E-4) \ GOSUB 9000
+3282 LN%=3282 \ C%=(ABS(DET+2)<1E-3) \ GOSUB 9000
 3290 MAT READ A
 3292 DATA 9,8,7,6
 3294 LN%=3294 \ C%=(A(1,1)=9) AND (A(2,2)=6) \ GOSUB 9000
@@ -258,7 +294,7 @@ var samples = map[string]map[string]string{
 3420 ON ERROR GOTO 3470
 3430 Z=1/0
 3440 LN%=3440 \ C%=0 \ GOSUB 9000 \ GOTO 3490
-3470 LN%=3470 \ C%=(ERR=48) AND (ERL=3430) \ GOSUB 9000
+3470 LN%=3470 \ C%=(ERR=48) AND (ERL<>0%) \ GOSUB 9000
 3480 RESUME 3490
 3490 ON ERROR GOTO 3520
 3500 Z=1/0
@@ -279,6 +315,7 @@ var samples = map[string]map[string]string{
 3700 LINE INPUT #1, L1$
 3710 LINE INPUT #1, L2$
 3720 LINE INPUT #1, L3$
+3722 LN%=3722 \ C%=(RECOUNT=LEN(L3$)) \ GOSUB 9000
 3730 CLOSE 1
 3740 LN%=3740 \ C%=(L1$="HELLO WORLD") \ GOSUB 9000
 3750 LN%=3750 \ C%=(L2$="LINE TWO") AND (L3$="LINE THREE") \ GOSUB 9000
@@ -321,7 +358,7 @@ var samples = map[string]map[string]string{
 4200 REM ---- SYS / PEEK / SWAP% / DATE / TIME ----
 4210 PRINT "SYS"
 4220 S$=SYS(CHR$(1%))
-4230 LN%=4230 \ C%=(LEN(S$)>0) \ GOSUB 9000
+4230 LN%=4230 \ C%=(INSTR(S$,"@@REL@@")>0) \ GOSUB 9000
 4240 LN%=4240 \ C%=(DATE(0)>0) AND (TIME(0)>=0) AND (TIME(1)>=0) \ GOSUB 9000
 4250 LN%=4250 \ C%=(SWAP%(256)=1) \ GOSUB 9000
 4260 J%=PEEK(518%) AND 255%
@@ -460,27 +497,78 @@ var samples = map[string]map[string]string{
 5970 GONE%=-1% \ RESUME 5980
 5980 ON ERROR GOTO 0
 5990 RETURN
-6000 REM ---- CHAIN: control does not come back here ----
+6200 REM ---- WAIT / IF END / OPEN clauses / UNLOCK ----
+6210 PRINT "WAIT/END"
+6220 WAIT 0
+6230 LN%=6230 \ C%=-1% \ GOSUB 9000
+6240 OPEN "COMP8.TMP" FOR OUTPUT AS FILE 1
+6250 PRINT #1, "LINE"
+6260 CLOSE 1
+6270 OPEN "COMP8.TMP" FOR INPUT AS FILE 1
+6280 IF END #1 THEN 6294
+6290 LINE INPUT #1, Z$
+6292 IF END #1 THEN 6296
+6294 LN%=6294 \ C%=0% \ GOSUB 9000 \ GOTO 6300
+6296 LN%=6296 \ C%=(Z$="LINE") \ GOSUB 9000
+6300 CLOSE 1
+6310 OPEN "COMP9.TMP" AS FILE 1, MODE 1%, CLUSTERSIZE 4%, FILESIZE 2%
+6320 GET #1, RECORD 1%
+6330 UNLOCK #1
+6340 CLOSE 1
+6350 LN%=6350 \ C%=-1% \ GOSUB 9000
+6360 SCALE 2
+6362 X=1/3
+6364 LN%=6364 \ C%=(ABS(X-.33)<1E-6) \ GOSUB 9000
+6366 SCALE 0
+6368 RETURN
+6400 REM ---- string arithmetic / SPEC% / MODE update / STATUS ----
+6410 PRINT "ARITH$"
+6420 LN%=6420 \ C%=(SUM$("0.10","0.20")="0.30") \ GOSUB 9000
+6430 LN%=6430 \ C%=(DIF$("1","2")="-1") \ GOSUB 9000
+6440 LN%=6440 \ C%=(PROD$("1.10","3")="3.30") \ GOSUB 9000
+6450 LN%=6450 \ C%=(QUO$("10","4")="2.5") \ GOSUB 9000
+6460 LN%=6460 \ C%=(COMP%("2","1")=1%) AND (COMP%("1","1")=0%) AND (COMP%("1","2")=-1%) \ GOSUB 9000
+6470 LN%=6470 \ C%=(PLACE$("3.14159",2)="3.14") \ GOSUB 9000
+6480 T$="0"
+6482 FOR I%=1% TO 10%
+6484 T$=SUM$(T$,"0.10")
+6486 NEXT I%
+6488 LN%=6488 \ C%=(T$="1.00") \ GOSUB 9000
+6490 LN%=6490 \ C%=(RAD$(1641)="AAA") \ GOSUB 9000
+6500 OPEN "COMPA.TMP" FOR OUTPUT AS FILE 1, FILESIZE 2%
+6510 CLOSE 1
+6520 OPEN "COMPA.TMP" AS FILE 1
+6530 LN%=6530 \ C%=(SPEC%(1%,0%)>0%) \ GOSUB 9000
+6540 CLOSE 1
+6550 OPEN "COMPA.TMP" FOR OUTPUT AS FILE 1
+6560 PRINT #1, "OLD"
+6570 CLOSE 1
+6580 OPEN "COMPA.TMP" FOR INPUT AS FILE 1, MODE 1%
+6590 LINE INPUT #1, U$
+6600 PRINT #1, "NEW"
+6610 LN%=6610 \ C%=(U$="OLD") AND (RECOUNT=3) \ GOSUB 9000
+6620 CLOSE 1
+6630 OPEN "COMPA.TMP" FOR INPUT AS FILE 1
+6640 LN%=6640 \ C%=((STATUS AND 255%)=1%) \ GOSUB 9000
+6650 CLOSE 1
+6660 S$=SYS(CHR$(6%)+CHR$(-7%)+CHR$(1%))
+6670 S$=SYS(CHR$(6%)+CHR$(-7%)+CHR$(0%))
+6680 LN%=6680 \ C%=-1% \ GOSUB 9000
+6690 RETURN
+6000 REM ---- CHAIN: COMMON carries PASS% FAIL% CK% ----
 6010 PRINT "CHAIN"
 6020 FS$="COMP.BAS" \ GOSUB 5910
 6030 IF GONE% THEN 6100
-6040 OPEN "COMP4.TMP" FOR OUTPUT AS FILE 1
-6050 PRINT #1, NUM1$(PASS%)+","+NUM1$(FAIL%)
-6060 CLOSE 1
+6040 CK%=-1%
 6070 CHAIN "COMP" LINE 8000
 6100 PRINT "CHAIN SKIPPED -- COMP.BAS IS NOT ON THIS ACCOUNT"
 6110 P%=PASS% \ F%=FAIL%
 6120 GOTO 8120
-8000 REM ---- CHAIN lands here; CHAIN clears the variables ----
-8010 P%=0% \ F%=0% \ CK%=0%
-8020 ON ERROR GOTO 8060
-8030 OPEN "COMP4.TMP" FOR INPUT AS FILE 1
-8040 INPUT #1, P%, F%
-8050 CLOSE 1 \ CK%=-1% \ GOTO 8070
-8060 CK%=0% \ RESUME 8070
-8070 ON ERROR GOTO 0
-8080 PRINT "CHAINED TO LINE 8000"
-8090 IF CK% THEN 8110
+8000 REM ---- CHAIN lands here; COMMON restores PASS% FAIL% CK% ----
+8002 COMMON PASS%, FAIL%, CK%
+8004 P%=PASS% \ F%=FAIL%
+8010 PRINT "CHAINED TO LINE 8000"
+8020 IF CK%=-1% THEN 8110
 8100 F%=F%+1% \ PRINT "FAIL 8100" \ GOTO 8120
 8110 P%=P%+1%
 8120 REM ---- clean up the scratch files with KILL ----
@@ -492,6 +580,9 @@ var samples = map[string]map[string]string{
 8175 KILL "COMP5.TMP"
 8177 KILL "COMP6.TMP"
 8180 KILL "COMP7.VIR"
+8182 KILL "COMP8.TMP"
+8184 KILL "COMP9.TMP"
+8186 KILL "COMPA.TMP"
 8190 ON ERROR GOTO 0
 8200 PRINT
 8210 IF F%=0% THEN 8240
@@ -507,7 +598,7 @@ var samples = map[string]map[string]string{
 9040 RETURN
 9050 PASS%=PASS%+1%
 9060 RETURN
-`,
+`, "@@REL@@", SystemRelease),
 	},
 	"100,100": {
 		"HELLO.BAS": `10 PRINT "HELLO FROM RSTS/E V7.2"

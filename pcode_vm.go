@@ -54,6 +54,7 @@ func (m *Machine) runImage(img *pcodeImage, immediate bool) error {
 		m.startLine = 0
 	}
 	m.data = append([]value(nil), img.Data...)
+	m.dataLines = append([]int(nil), img.DataLines...)
 	m.dataPtr = 0
 	m.running = true
 	m.Stopped = false
@@ -78,6 +79,23 @@ func (m *Machine) runImage(img *pcodeImage, immediate bool) error {
 	return vm.run()
 }
 
+func (vm *pvm) handleInterrupt() error {
+	m := vm.m
+	if m.trapCtrlC && m.onErrorLine != 0 && !m.inHandler {
+		m.intr.Store(false)
+		err := attachLine(basicErrCode("Programmable ^C trap", 28), m.CurrentLine)
+		if tj, ok := m.trap(err); ok {
+			ip, found := vm.img.lineIP(tj.line)
+			if !found {
+				return basicErrAt("Undefined line number", m.CurrentLine)
+			}
+			vm.pc = ip
+			return nil
+		}
+	}
+	return ErrInterrupt
+}
+
 func (vm *pvm) run() error {
 	m := vm.m
 	ops := 0
@@ -87,10 +105,17 @@ func (vm *pvm) run() error {
 			return m.err("Too many iterations")
 		}
 		if m.intr.Load() {
-			return ErrInterrupt
+			if err := vm.handleInterrupt(); err != nil {
+				return err
+			}
+			continue
 		}
 		if ops&1023 == 0 && m.IO.PollInterrupt != nil && m.IO.PollInterrupt() {
-			return ErrInterrupt
+			m.intr.Store(true)
+			if err := vm.handleInterrupt(); err != nil {
+				return err
+			}
+			continue
 		}
 		if vm.pc >= len(vm.img.Code) {
 			return nil
@@ -411,6 +436,27 @@ func (vm *pvm) step(op byte) error {
 		if flags&openVirtual != 0 {
 			st.org = "VIRTUAL"
 		}
+		if flags&openFileSize != 0 {
+			n, err := vm.popNum()
+			if err != nil {
+				return err
+			}
+			st.fileSize = numLit{v: n}
+		}
+		if flags&openCluster != 0 {
+			n, err := vm.popNum()
+			if err != nil {
+				return err
+			}
+			st.clusSize = numLit{v: n}
+		}
+		if flags&openModeN != 0 {
+			n, err := vm.popNum()
+			if err != nil {
+				return err
+			}
+			st.modeN = numLit{v: n}
+		}
 		if flags&openRecSize != 0 {
 			rs, err := vm.popNum()
 			if err != nil {
@@ -440,6 +486,7 @@ func (vm *pvm) step(op byte) error {
 		}
 		n := int(ch)
 		if f := m.Files[n]; f != nil {
+			m.unlockChan(f)
 			closeChanFile(f)
 		}
 		delete(m.Files, n)
@@ -650,6 +697,77 @@ func (vm *pvm) step(op byte) error {
 			ch = int(v)
 		}
 		return m.dimVirtArray(name, bounds, ch, strLen)
+	case opCommon:
+		return vm.execCommon()
+	case opWait:
+		n, err := vm.popNum()
+		if err != nil {
+			return err
+		}
+		if n < 0 {
+			n = 0
+		}
+		m.inputWait = n
+		return nil
+	case opUnlock:
+		ch, err := vm.popNum()
+		if err != nil {
+			return err
+		}
+		return m.doUnlock(int(ch))
+	case opIfEnd:
+		ch, err := vm.popNum()
+		if err != nil {
+			return err
+		}
+		ok, err := m.channelAtEnd(int(ch))
+		if err != nil {
+			return err
+		}
+		if ok {
+			vm.push(numValue(-1))
+		} else {
+			vm.push(numValue(0))
+		}
+		return nil
+	case opMidSet:
+		name := vm.str()
+		ndims := int(vm.u8())
+		flags := vm.u8()
+		idxs, err := vm.popIdx(ndims)
+		if err != nil {
+			return err
+		}
+		length := 0.0
+		hasLen := flags&1 != 0
+		if hasLen {
+			length, err = vm.popNum()
+			if err != nil {
+				return err
+			}
+		}
+		start, err := vm.popNum()
+		if err != nil {
+			return err
+		}
+		repl, err := vm.pop()
+		if err != nil {
+			return err
+		}
+		return m.doMidSet(name, idxs, start, length, hasLen, m.strVal(repl))
+	case opScale:
+		n, err := vm.popNum()
+		if err != nil {
+			return err
+		}
+		return m.setScale(int(n))
+	case opRestoreAt:
+		n, err := vm.popNum()
+		if err != nil {
+			return err
+		}
+		m.restoreAt(int(n))
+		return nil
 	default:
 		return m.err("Compiled file")
 	}
@@ -1025,10 +1143,34 @@ func (vm *pvm) execChain() error {
 	if err != nil {
 		return err
 	}
+	vm.m.packCommon()
 	vm.m.chainTo = vm.m.strVal(path)
 	vm.m.chainLine = line
 	vm.m.running = false
 	return nil
+}
+
+func (vm *pvm) execCommon() error {
+	name := vm.str()
+	n := int(vm.u8())
+	hasLen := vm.u8() != 0
+	strLen := 0
+	if hasLen {
+		v, err := vm.popNum()
+		if err != nil {
+			return err
+		}
+		strLen = int(v)
+	}
+	bounds := make([]int, n)
+	for i := n - 1; i >= 0; i-- {
+		v, err := vm.popNum()
+		if err != nil {
+			return err
+		}
+		bounds[i] = int(v)
+	}
+	return vm.m.doCommonItem(name, bounds, strLen)
 }
 
 func (vm *pvm) execSleep() error {

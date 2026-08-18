@@ -50,6 +50,7 @@ type System struct {
 	listener interface{ Close() error }
 	shutdown chan struct{}
 	console  *Shell
+	noLogins bool
 }
 
 func NewSystem(diskRoot string, cfg Config) (*System, error) {
@@ -76,9 +77,17 @@ func NewSystem(diskRoot string, cfg Config) (*System, error) {
 		pkInUse:  map[int]bool{},
 		shutdown: make(chan struct{}),
 	}
+	disk.quotaOf = func(proj, prog int) int {
+		a := db.FindPPN(proj, prog)
+		if a == nil {
+			return 0
+		}
+		return a.Quota
+	}
 	if err := sys.seedSamples(); err != nil {
 		return nil, err
 	}
+	sys.startSpooler()
 	return sys, nil
 }
 

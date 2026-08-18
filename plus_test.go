@@ -206,18 +206,19 @@ func TestVirtualMap(t *testing.T) {
 			return nil
 		},
 	})
-	src := `10 OPEN "DATA.TMP" AS FILE 1%, ORGANIZATION VIRTUAL
-20 MAP (DATMAP) LONG X%, STRING A$ = 20
-30 FOR I% = 1% TO 1000%
-40   X% = I% * 5% \ A$ = "Record #" + NUM1$(I%)
-50   PUT #1%, RECORD I%
-60 NEXT I%
-70 GET #1%, RECORD 1
-80 PRINT X%; A$
-90 GET #1%, RECORD 1000
-100 PRINT X%; A$
-110 CLOSE #1%
-120 END
+	src := `10 EXTEND
+20 OPEN "DATA.TMP" AS FILE 1%, ORGANIZATION VIRTUAL
+30 MAP (DATMAP) LONG X%, STRING A$ = 20
+40 FOR I% = 1% TO 1000%
+50   X% = I% * 5% \ A$ = "Record #" + NUM1$(I%)
+60 PUT #1%, RECORD I%
+70 NEXT I%
+80 GET #1%, RECORD 1
+90 PRINT X%; A$
+100 GET #1%, RECORD 1000
+110 PRINT X%; A$
+120 CLOSE #1%
+130 END
 `
 	if err := m.LoadSource(src, "DATA"); err != nil {
 		t.Fatal(err)
@@ -304,9 +305,36 @@ func TestComp(t *testing.T) {
 	if !strings.Contains(out, "ALL PASSED") {
 		t.Fatalf("comp did not pass:\n%s", out)
 	}
+	if !strings.Contains(out, SystemRelease) {
+		t.Fatalf("comp did not report %s:\n%s", SystemRelease, out)
+	}
 	if !strings.Contains(out, "CHAINED TO LINE 8000") {
 		t.Fatalf("comp did not chain:\n%s", out)
 	}
+	c.out.Reset()
+	if _, err := m.Renumber(10, 10); err != nil {
+		t.Fatalf("renum: %v", err)
+	}
+	if strings.Contains(listing(m), "RESTORE 1845") {
+		t.Fatalf("RESTORE 1845 survived RENUM:\n%s", listing(m))
+	}
+	if strings.Contains(listing(m), `CHAIN "COMP" LINE 8000`) {
+		t.Fatalf("CHAIN \"COMP\" LINE 8000 survived RENUM:\n%s", listing(m))
+	}
+	if err := os.WriteFile(filepath.Join(dir, "COMP.BAS"), []byte(m.SourceText()), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := m.RunProgram(); err != nil {
+		t.Fatalf("run after renum: %v\n%s", err, c.out.String())
+	}
+	out = c.out.String()
+	if strings.Contains(out, "FAIL") {
+		t.Fatalf("comp after renum failures:\n%s", out)
+	}
+	if !strings.Contains(out, "ALL PASSED") {
+		t.Fatalf("comp after renum did not pass:\n%s", out)
+	}
+
 	// The chained pass ends by KILLing everything it made.
 	left, err := os.ReadDir(dir)
 	if err != nil {
@@ -368,5 +396,38 @@ func TestCompWithoutChainTarget(t *testing.T) {
 	}
 	if !strings.Contains(out, "ALL PASSED") {
 		t.Fatalf("comp did not pass:\n%s", out)
+	}
+}
+
+func TestCompRenumThroughShell(t *testing.T) {
+	sh, err := NewShell(t.TempDir(), "", false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	sh.Login("SYSTEM", "SYSTEM")
+	var out strings.Builder
+	sh.out = &out
+	sh.Dispatch("OLD COMP")
+	out.Reset()
+	sh.Dispatch("RENUM")
+	if strings.Contains(out.String(), "Undefined") {
+		t.Fatalf("renum: %s", out.String())
+	}
+	if strings.Contains(listing(sh.Basic), "RESTORE 1845") {
+		t.Fatalf("RESTORE 1845 survived RENUM:\n%s", listing(sh.Basic))
+	}
+	if strings.Contains(listing(sh.Basic), `CHAIN "COMP" LINE 8000`) {
+		t.Fatalf("CHAIN \"COMP\" LINE 8000 survived RENUM:\n%s", listing(sh.Basic))
+	}
+	out.Reset()
+	sh.Dispatch("REPLACE")
+	out.Reset()
+	sh.Dispatch("RUN")
+	got := out.String()
+	if strings.Contains(got, "FAIL") {
+		t.Fatalf("comp after shell RENUM:\n%s", got)
+	}
+	if !strings.Contains(got, "ALL PASSED") {
+		t.Fatalf("comp after shell RENUM did not pass:\n%s", got)
 	}
 }

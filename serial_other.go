@@ -13,3 +13,5 @@ func openSerial(path string) (*os.File, error) {
 func pollRead(f *os.File, buf []byte) (int, error) {
 	return 0, os.ErrDeadlineExceeded
 }
+
+func setSerialSpeed(*os.File, int) error { return nil }

@@ -103,6 +103,21 @@ func applySerialMode(h windows.Handle) error {
 	return windows.SetCommTimeouts(h, &blockingTimeouts)
 }
 
+func setSerialSpeed(f *os.File, baud int) error {
+	n, ok := canonicalBaud(baud)
+	if !ok {
+		return nil
+	}
+	h := windows.Handle(f.Fd())
+	var dcb windows.DCB
+	dcb.DCBlength = uint32(unsafe.Sizeof(dcb))
+	if err := windows.GetCommState(h, &dcb); err != nil {
+		return err
+	}
+	dcb.BaudRate = uint32(n)
+	return windows.SetCommState(h, &dcb)
+}
+
 // pollRead takes whatever is already waiting on the line and returns
 // straight away. os.ErrDeadlineExceeded means nothing had arrived, which
 // on a communications port is not the end of the line.

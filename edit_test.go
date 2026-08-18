@@ -47,10 +47,23 @@ func (t *scriptTerm) ReadLine(string) (string, error)     { return "", io.EOF }
 func (t *scriptTerm) ReadPassword(string) (string, error) { return "", io.EOF }
 
 const (
-	ctrlC = 3
-	ctrlK = 11
-	ctrlW = 23
-	ctrlX = 24
+	ctrlC          = 3
+	ctrlG          = 7
+	ctrlK          = 11
+	ctrlO          = 15
+	ctrlQ          = 17
+	ctrlR          = 18
+	ctrlS          = 19
+	ctrlT          = 20
+	ctrlU          = 21
+	ctrlV          = 22
+	ctrlW          = 23
+	ctrlX          = 24
+	ctrlY          = 25
+	ctrlBackslash  = 28
+	ctrlRBrack     = 29
+	ctrlCaret      = 30
+	ctrlUnderscore = 31
 )
 
 func runEditor(t *testing.T, text string, keys []byte) (string, *scriptTerm, bool) {
@@ -433,6 +446,229 @@ func TestEditNeedsATerminal(t *testing.T) {
 	sh.term = &plainTerm{}
 	if err := sh.cmdEdit(""); err == nil {
 		t.Fatal("EDIT should decline a terminal it cannot drive")
+	}
+}
+
+func TestEditFindAndFindAgain(t *testing.T) {
+	keys := []byte{ctrlS}
+	keys = append(keys, []byte("BBB")...)
+	keys = append(keys, '\r', 'X', ctrlX)
+	saved, _, _ := runEditor(t, "AAA\nBBB\nAAA\n", keys)
+	if saved != "AAA\nXBBB\nAAA\n" {
+		t.Fatalf("find: %q", saved)
+	}
+
+	keys = []byte{ctrlS}
+	keys = append(keys, []byte("AAA")...)
+	keys = append(keys, '\r', ctrlS, '\r', 'X', ctrlX)
+	saved, _, _ = runEditor(t, "AAA\nBBB\nAAA\n", keys)
+	if saved != "AAA\nBBB\nXAAA\n" {
+		t.Fatalf("find again: %q", saved)
+	}
+}
+
+func TestEditFindWraps(t *testing.T) {
+	keys := []byte{ctrlS}
+	keys = append(keys, []byte("AAA")...)
+	keys = append(keys, '\r', ctrlS, '\r', ctrlS, '\r', 'X', ctrlX)
+	saved, term, _ := runEditor(t, "AAA\nBBB\nAAA\n", keys)
+	if saved != "XAAA\nBBB\nAAA\n" {
+		t.Fatalf("wrapped find: %q", saved)
+	}
+	if !strings.Contains(term.out.String(), "wrapped") {
+		t.Fatal("expected wrapped on the status line")
+	}
+}
+
+func TestEditFindNotFound(t *testing.T) {
+	keys := []byte{ctrlS}
+	keys = append(keys, []byte("ZZZ")...)
+	keys = append(keys, '\r', ctrlC)
+	_, term, ok := runEditor(t, "AAA\n", keys)
+	if ok {
+		t.Fatal("should have quit without saving")
+	}
+	if !strings.Contains(term.out.String(), "not found") {
+		t.Fatal("expected not found on the status line")
+	}
+}
+
+func TestEditFindCancel(t *testing.T) {
+	keys := []byte{ctrlS, ctrlG, 'X', ctrlX}
+	saved, _, _ := runEditor(t, "AAA\n", keys)
+	if saved != "XAAA\n" {
+		t.Fatalf("cancelled find should leave the cursor: %q", saved)
+	}
+}
+
+func TestEditReverseFind(t *testing.T) {
+	keys := []byte{ctrlG}
+	keys = append(keys, []byte("3")...)
+	keys = append(keys, '\r', 5, ctrlR) // line 3, end of line, reverse
+	keys = append(keys, []byte("AAA")...)
+	keys = append(keys, '\r', 'X', ctrlX)
+	saved, _, _ := runEditor(t, "AAA\nBBB\nAAA\n", keys)
+	if saved != "AAA\nBBB\nXAAA\n" {
+		t.Fatalf("reverse find: %q", saved)
+	}
+}
+
+func TestEditReplaceAll(t *testing.T) {
+	keys := []byte{ctrlBackslash}
+	keys = append(keys, []byte("FOO")...)
+	keys = append(keys, '\r')
+	keys = append(keys, []byte("BAZ")...)
+	keys = append(keys, '\r', 'A', ctrlX)
+	saved, _, _ := runEditor(t, "FOO BAR FOO\n", keys)
+	if saved != "BAZ BAR BAZ\n" {
+		t.Fatalf("replace all: %q", saved)
+	}
+}
+
+func TestEditReplaceOneThenStop(t *testing.T) {
+	keys := []byte{ctrlBackslash}
+	keys = append(keys, []byte("FOO")...)
+	keys = append(keys, '\r')
+	keys = append(keys, []byte("BAZ")...)
+	keys = append(keys, '\r', 'Y', 'Q', ctrlX)
+	saved, _, _ := runEditor(t, "FOO BAR FOO\n", keys)
+	if saved != "BAZ BAR FOO\n" {
+		t.Fatalf("replace one: %q", saved)
+	}
+}
+
+func TestEditReplaceSkip(t *testing.T) {
+	keys := []byte{ctrlBackslash}
+	keys = append(keys, []byte("FOO")...)
+	keys = append(keys, '\r')
+	keys = append(keys, []byte("BAZ")...)
+	keys = append(keys, '\r', 'N', 'Y', ctrlX)
+	saved, _, _ := runEditor(t, "FOO BAR FOO\n", keys)
+	if saved != "FOO BAR BAZ\n" {
+		t.Fatalf("replace skip: %q", saved)
+	}
+}
+
+func TestEditKillYank(t *testing.T) {
+	keys := []byte{ctrlK, 14, 1, ctrlY, ctrlX} // kill ONE, down, start of THREE, yank
+	saved, _, _ := runEditor(t, "ONE\nTWO\nTHREE\n", keys)
+	if saved != "TWO\nONE\nTHREE\n" {
+		t.Fatalf("yank: %q", saved)
+	}
+}
+
+func TestEditKillYankConsecutive(t *testing.T) {
+	keys := []byte{ctrlK, ctrlK, 1, ctrlY, ctrlX}
+	saved, _, _ := runEditor(t, "ONE\nTWO\nTHREE\n", keys)
+	if saved != "ONE\nTWO\nTHREE\n" {
+		t.Fatalf("consecutive kill: %q", saved)
+	}
+}
+
+func TestEditGotoLine(t *testing.T) {
+	keys := []byte{ctrlG}
+	keys = append(keys, []byte("3")...)
+	keys = append(keys, '\r', 'X', ctrlX)
+	saved, _, _ := runEditor(t, "A\nB\nC\n", keys)
+	if saved != "A\nB\nXC\n" {
+		t.Fatalf("goto: %q", saved)
+	}
+}
+
+func TestEditWordMotion(t *testing.T) {
+	keys := []byte{ctrlRBrack, 'X', ctrlX}
+	saved, _, _ := runEditor(t, "PRINT 1\n", keys)
+	if saved != "PRINTX 1\n" {
+		t.Fatalf("word forward: %q", saved)
+	}
+
+	keys = []byte{5, ctrlUnderscore, 'X', ctrlX}
+	saved, _, _ = runEditor(t, "PRINT 1\n", keys)
+	if saved != "PRINT X1\n" {
+		t.Fatalf("word back: %q", saved)
+	}
+}
+
+func TestEditMarkCopyYank(t *testing.T) {
+	keys := []byte{ctrlCaret, 6, 6, ctrlV, 5, ctrlY, ctrlX}
+	saved, _, _ := runEditor(t, "HELLO\n", keys)
+	if saved != "HELLOHE\n" {
+		t.Fatalf("copy region: %q", saved)
+	}
+}
+
+func TestEditMarkCut(t *testing.T) {
+	keys := []byte{ctrlCaret, 6, 6, ctrlQ, ctrlX}
+	saved, _, _ := runEditor(t, "HELLO\n", keys)
+	if saved != "LLO\n" {
+		t.Fatalf("cut region: %q", saved)
+	}
+}
+
+func TestEditTranspose(t *testing.T) {
+	keys := []byte{ctrlT, ctrlX}
+	saved, _, _ := runEditor(t, "AB\n", keys)
+	if saved != "BA\n" {
+		t.Fatalf("transpose: %q", saved)
+	}
+}
+
+func TestEditOpenLine(t *testing.T) {
+	keys := []byte{ctrlO, ctrlX}
+	saved, _, _ := runEditor(t, "AB\n", keys)
+	if saved != "\nAB\n" {
+		t.Fatalf("open line: %q", saved)
+	}
+}
+
+func TestEditKillToBOL(t *testing.T) {
+	keys := []byte{5, ctrlU, ctrlY, ctrlX}
+	saved, _, _ := runEditor(t, "HELLO\n", keys)
+	if saved != "HELLO\n" {
+		t.Fatalf("kill to BOL then yank: %q", saved)
+	}
+
+	keys = []byte{5, ctrlU, ctrlX}
+	saved, _, _ = runEditor(t, "HELLO\n", keys)
+	if saved != "\n" {
+		t.Fatalf("kill to BOL: %q", saved)
+	}
+}
+
+func TestEditOverwrite(t *testing.T) {
+	keys := []byte{27, '[', '2', '~', 'X', ctrlX}
+	saved, _, _ := runEditor(t, "ABC\n", keys)
+	if saved != "XBC\n" {
+		t.Fatalf("overwrite: %q", saved)
+	}
+}
+
+func TestEditBufferFind(t *testing.T) {
+	b := newEditBuffer("AAA\nBBB\nAAA\n")
+	ok, wrapped := b.find("BBB", true, false)
+	if !ok || wrapped || b.cy != 1 || b.cx != 0 {
+		t.Fatalf("forward find at %d,%d ok=%v wrap=%v", b.cy, b.cx, ok, wrapped)
+	}
+	ok, wrapped = b.find("AAA", true, false)
+	if !ok || b.cy != 2 {
+		t.Fatalf("next AAA at line %d (wrap %v)", b.cy+1, wrapped)
+	}
+	ok, wrapped = b.find("AAA", true, true)
+	if !ok || !wrapped || b.cy != 0 {
+		t.Fatalf("wrap to %d,%d ok=%v wrap=%v", b.cy, b.cx, ok, wrapped)
+	}
+	b.cy, b.cx = 2, 3
+	ok, wrapped = b.find("AAA", false, false)
+	if !ok || wrapped || b.cy != 2 || b.cx != 0 {
+		t.Fatalf("reverse on last line at %d,%d wrap=%v", b.cy, b.cx, wrapped)
+	}
+	ok, wrapped = b.find("AAA", false, true)
+	if !ok || wrapped || b.cy != 0 {
+		t.Fatalf("reverse again at line %d wrap=%v", b.cy+1, wrapped)
+	}
+	ok, _ = b.find("ZZZ", true, false)
+	if ok {
+		t.Fatal("ZZZ should not be found")
 	}
 }
 

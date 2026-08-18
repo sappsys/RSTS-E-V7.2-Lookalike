@@ -11,25 +11,41 @@ const defaultConfigName = "config.toml"
 
 const defaultConfigTOML = "# " + SystemLong + `  (PDP-11/70)
 #
-# telnet_port 23 needs root or CAP_NET_BIND_SERVICE on Unix.
-# Use 2323 (or any port >1023) if you are not root:
-#   telnet_port = 2323
+# Every setting this build understands is listed below.
+# Commented lines are defaults, or options that are not in use.
+# Uncomment a line to override. Flags on the command line still win.
 
-# Serial lines, comma separated. Each one runs at 9600 8N1 and behaves
-# exactly like a Telnet line: one job per line, its own KB:, and the
-# line is offered again when the user logs off.
-#   serial = "/dev/ttyUSB0,/dev/ttyS0"
+# Simultaneous jobs (1..63). Real RSTS/E V7.2 on an 11/70 allowed 63.
+# max_users = 25
 
-max_users = 25
-telnet_port = 23
-telnet_bind = "0.0.0.0"
-telnet = true
-console = true
-serial = ""
+# Telnet listener. Port 23 needs root or CAP_NET_BIND_SERVICE on Unix.
+# Use 2323 (or any port >1023) if you are not root.
+# telnet_port = 23
+# telnet_port = 2323
+# telnet_bind = "0.0.0.0"
+# telnet = true
+
+# Local console on stdin/stdout (KB0:). --no-console overrides.
+# console = true
+
+# Serial lines. Unused here. Comma-separated host devices, 9600 8N1.
+# Each line is a RSTS job on its own KB: and is offered again at logoff.
+# serial = ""
+# serial = "/dev/ttyUSB0,/dev/ttyS0"
+# serial = "COM1,COM3"
+
+# Virtual disk directory. Default is ./disk, or $RSTS_DISK. --disk overrides.
+# disk = "./disk"
+
+# Console auto-login. Unused; HELLO at Bye is the usual way in.
+# guest = false
+# login = ""
+# login = "GUEST"
 `
 
-// Config is loaded from config.toml. MaxUsers is this emulator's
-// simultaneous-job cap (real RSTS/E on an 11/70 allowed 63).
+// Config is loaded from config.toml. Command-line flags still override.
+// MaxUsers is this emulator's simultaneous-job cap (real RSTS/E on an
+// 11/70 allowed 63).
 type Config struct {
 	MaxUsers   int
 	TelnetPort int
@@ -38,8 +54,15 @@ type Config struct {
 	Console    bool
 	// Serial lines to answer, each at 9600 8N1.
 	Serial []string
+	// Disk is the virtual disk directory. Empty means ./disk, or $RSTS_DISK.
+	Disk string
+	// Guest logs the console in as GUEST. Login names the account to prompt for.
+	Guest bool
+	Login string
 }
 
+// DefaultConfig is what a missing or empty config.toml uses: 25 jobs,
+// Telnet on port 23, a local console, and no serial lines.
 func DefaultConfig() Config {
 	return Config{
 		MaxUsers:   25,
@@ -82,6 +105,8 @@ func splitSerial(s string) []string {
 	return out
 }
 
+// LoadConfig reads path (default config.toml). If the file is missing it
+// writes the annotated template and returns the built-in defaults.
 func LoadConfig(path string) (Config, string, error) {
 	cfg := DefaultConfig()
 	if path == "" {
@@ -157,6 +182,24 @@ func parseTOML(src string, cfg *Config) error {
 				return fmt.Errorf("serial: %w", err)
 			}
 			cfg.Serial = splitSerial(s)
+		case "disk":
+			s, err := tomlString(val)
+			if err != nil {
+				return fmt.Errorf("disk: %w", err)
+			}
+			cfg.Disk = s
+		case "guest":
+			b, err := tomlBool(val)
+			if err != nil {
+				return fmt.Errorf("guest: %w", err)
+			}
+			cfg.Guest = b
+		case "login":
+			s, err := tomlString(val)
+			if err != nil {
+				return fmt.Errorf("login: %w", err)
+			}
+			cfg.Login = s
 		}
 	}
 	return nil

@@ -6,13 +6,115 @@ Newest first.
 The system portrayed is RSTS/E V7.2 on a PDP-11/70, and that does not
 change. DEC numbered the update level after the dash -- V7.2-10 was a
 real one -- and this project uses that number for its own releases. So
-V7.2-10 is the first release here, V7.2-11 the next, and the emulator
+V7.2-10 is the first release here, V7.2-11 this one, and the emulator
 identifies itself with whichever it is built from: SYS(CHR$(1)) and the
 login banner both report it.
 
 
-V7.2-11   in progress
+V7.2-11   18-Aug-2026
 ---------------------
+
+Second tagged release.
+https://github.com/sappsys/RSTS-E-V7.2-Lookalike/releases/tag/V7.2-11
+
+BASIC-PLUS
+
+  EXTEND and NOEXTEND are statements. Default is NOEXTEND: names are one
+  letter plus optional $ or % (FNA, A$). EXTEND allows names up to 29
+  characters. The mode follows the program in line-number order, including
+  mid-line (NOEXTEND \ EXTEND). Immediate EXTEND/NOEXTEND set the keyboard
+  mode until NEW.
+
+  OPEN takes MODE n, CLUSTERSIZE n and FILESIZE n as well as RECORDSIZE.
+  FILESIZE allocates that many 512-byte blocks. CLUSTERSIZE is what DIR
+  and pack usage count. An account Quota in accounts.json, when set, is
+  the block limit for that PPN.
+
+  COMMON A, B$(n) is a positional block that survives CHAIN, so a
+  multi-segment program can pass scalars and arrays without a scratch
+  file. WAIT n is the keyboard timeout for the next INPUT (error 15).
+  IF END #n THEN branches when the next read on that channel would be at
+  EOF. MID$(A$,i,n)=B$ replaces n characters of A$ starting at i.
+
+  GET of a disk record interlocks that block for the job until UNLOCK,
+  the next GET or PUT, or CLOSE. Sequential INPUT # of a shared file
+  interlocks the 512-byte block the same way (error 19). OPEN MODE bits:
+  1 update, 2 append, 8 wait if in use, 16 exclusive locked-open (error 3),
+  32 contiguous, 64 tentative (deleted unless CLOSE), 128 no supersede
+  (error 16), 256 read regardless of protection.
+
+  RESTORE n rereads DATA starting at that line. RENUM rewrites that n
+  the same way it rewrites GOTO and GOSUB, and rewrites CHAIN LINE n
+  when the filespec is this program. COMP's ON ERROR check uses ERL<>0
+  rather than a hardcoded line, so the exerciser still passes after
+  RENUM and REPLACE.
+
+  SPEC%(ch,fn) controls magtape: rewind, tape mark, skip. OPEN of MT:,
+  PP:/PR:, CR:, DX: and DT: uses a host file of 512-byte records (or
+  sequential text for paper tape and cards) under the disk root.
+
+  XLATE and XLATE$ translate through a 256-character table; a NUL in the
+  table deletes that character.
+
+  SYS(CHR$(6%)+CHR$(-7%)+CHR$(1%)) enables programmable Ctrl-C: ON ERROR
+  then sees error 28 instead of dropping to Ready. CHR$(0%) turns it off.
+  Other FIP subcodes this host can back are wired (pack ID, assign,
+  hangup, logins, send, directory lookup); unknown subcodes return zeros
+  rather than a dummy PPN.
+
+  INPUT # from a PK: job is interrupted by Ctrl-C on the parent keyboard.
+
+  SCALE n (0-6) rounds the results of +, -, *, / and floating stores to
+  n decimal places. SCALE 0 is full precision. It survives CHAIN.
+
+  COMP.BAS on [1,2] is the language exerciser for this release: it checks
+  SYS(CHR$(1)) for V7.2-11, multi-line DEF/FNEND/FNEXIT, string arithmetic,
+  SPEC%, MODE 1 update, STATUS, RECOUNT, DET, SCALE, RESTORE n, and the
+  rest of BASIC-PLUS. LOGIN.TXT and NOTICE.TXT name this release too.
+
+  Tests cover PIP /AP /NE /PROT, PLEASE/RE, FIP lookup and login disable,
+  OPEN MODE 64/256, mid-line EXTEND, and DIR /A /B /C /N.
+
+Keyboard
+
+  config.toml lists every setting (max_users, telnet_port, telnet_bind,
+  telnet, console, serial, disk, guest, login). Defaults and unused
+  options stay commented; uncomment a line to override.
+
+  DIR/W /S /P /F /N /B /A /C /SU /H
+                  wide, size, protection, full, no header, brief,
+                  allocation, cluster, summary, header
+  PIP/DE /LI /RE /AP /NE /PROT:n /GO /HE /DI /WI /BR
+                  delete, list, rename, append, no supersede, protection,
+                  continue, help, directory, wide, brief
+                  PIP dst=a,b concatenates; switches may follow the filespec
+  PLEASE [text]   message to the operator console; PLEASE/LI  PLEASE/RE
+  QUE [filespec]  line-printer queue; QUE/LI  QUE/DE n
+  QUMRUN          drains QUE onto host LP0 (the printer stand-in)
+  BACKUP / BCK    copy files to MT0: (512-byte host image); BACKUP/RE restores
+  SUBMIT filespec  run a command file as a detached job (also BATCH)
+  QUOLST          disk and logged-in job quotas
+  QUOLST/SET n    (priv) set the disk quota; REACT QUOTA [p,pn] n
+  CCL name=filespec  (priv) install a keyboard command; CCL/DE  CCL
+  SHUTUP          (priv) halt every job
+  UTILITY         (priv) REACT, DSKINT, CCL, SHUTUP
+  HELLO/DETACH    log in and detach; keyboard returns to Bye
+  TTYSET          WIDTH, ECHO, SCOPE, TAB, FORM, FILL, GAG, SPEED, TYPE
+                  SCOPE is required for EDIT; NOTAB expands tabs; NOFORM
+                  strips form feeds; FILL writes NULs; SPEED sets serial
+                  baud; TYPE is what the editor draws.
+
+  OPEN "LP:" still writes LPn.LST; CLOSE enters that file in QUE, and
+  QUMRUN copies it to LP0.
+
+  Ctrl-O discards output until the next Ctrl-O. Ctrl-R redisplays the
+  input line. SET GAG drops BROADCAST ALL on that keyboard.
+
+  An account Quota is the block limit; writing past it (SAVE, COPY,
+  FILESIZE, PRINT #) is error 4. JobQuota is how many jobs that PPN
+  may have logged in. REACT QUOTA / QUOLST/SET write the limit;
+  accounts.json still works.
+
 
 BASIC-PLUS
 
@@ -47,11 +149,15 @@ BASIC-PLUS
       OPEN "LP:" AS FILE n    the printer. No printer is attached to
                               this 11/70, so it spools to LPn.LST in
                               the account, or to a name given after
-                              the colon
+                              the colon, and QUMRUN copies it to LP0
       OPEN "NL:" AS FILE n    the null device: output is swallowed and
                               a read is at end of file at once
+      OPEN "MT:" AS FILE n    magtape image (disk/MT0, 512-byte records)
+      OPEN "PP:" / "PR:"      paper-tape punch / reader
+      OPEN "CR:"              card reader (80-column images)
+      OPEN "DX:" / "DT:"      floppy / DECtape images
 
-  TT: is accepted for KB:.
+  TT: is accepted for KB:. SPEC%(ch,fn) rewinds and skips magtape.
 
   The variables a program reads after an operation:
 
@@ -68,9 +174,9 @@ Serial lines
 
   Each is answered at 9600 8N1 and is a job on its own KB: line,
   behaving exactly as a Telnet connection does, and the line is offered
-  again when the user logs off, the way a getty would. Real terminals
-  and USB-serial adapters can now be hung off the emulator with no
-  network involved.
+  again when the user logs off, the way a getty would. SET SPEED n
+  changes the baud. Real terminals and USB-serial adapters can now be
+  hung off the emulator with no network involved.
 
   The line is opened raw with no flow control and no modem control
   lines, so a three-wire cable works, and O_NOCTTY keeps a Ctrl-C on the
@@ -202,11 +308,16 @@ Editor
       EDIT              the BASIC program in memory, line numbers and all
       EDIT NOTES.TXT    a file, created on write if it is new
 
-  Arrow keys move, ^A and ^E go to the ends of a line, RETURN splits, DEL
-  and ^H rub out backwards, ^D deletes forwards, ^K kills a line, ^W
-  writes, ^X writes and exits, ^C leaves (twice if there are unsaved
-  changes) and ^L redraws. A status line shows the file, the position and
-  whether anything is unsaved.
+  Arrow keys move, ^A and ^E go to the ends of a line, ^] and ^_ by
+  words, ^G to a typed line number. RETURN splits, ^O opens a line
+  without moving. DEL and ^H rub out backwards, ^D deletes forwards, ^K
+  kills a line into the yank buffer, ^U kills to the start of the line,
+  ^T transposes. ^S and ^R find (empty repeats, wraps around), ^\ replaces
+  from the cursor to the end of the file (Y this match, N skip, A the
+  rest, ^G stop), ^Y yanks. ^^ sets a mark, ^V copies the region and ^Q
+  cuts it. Insert toggles overwrite. ^W writes, ^X writes and exits, ^C
+  leaves (twice if there are unsaved changes) and ^L redraws. A status
+  line shows the file, the position and whether anything is unsaved.
 
   It writes VT52 sequences to a terminal that reports itself as a VT52
   and ANSI to everything else, so it suits both a period setup and a
@@ -224,16 +335,19 @@ BASIC-PLUS
 
   RENUM, also spelled RENUMBER, RESEQ and RESEQUENCE, resequences the
   program and follows every reference with it: GOTO, GOSUB, ON ... GOTO,
-  ON ... GOSUB, THEN, ELSE, RESUME and ON ERROR GOTO. Default 10,10.
+  ON ... GOSUB, THEN, ELSE, RESUME, RESTORE, ON ERROR GOTO, and CHAIN
+  LINE n when the filespec is this program (so REPLACE after RENUM still
+  chains into COMP). Default 10,10.
 
       RENUM            RENUM 100        RENUM 100,20      RENUM ,5
 
   The 0 in ON ERROR GOTO 0 and RESUME 0 is not a line number and is left
-  alone, and neither is the line number in CHAIN "NEXT" LINE 100, which
-  belongs to the other program. A reference to a line that does not exist
-  is left as it was and reported, rather than being repointed at whatever
-  now occupies that number. The last line may not pass 32767, and CONT
-  will not resume a renumbered program.
+  alone. CHAIN "NEXT" LINE 100 keeps 100 (that line belongs to NEXT).
+  CHAIN "COMP" LINE 8000 is rewritten when this program is COMP. A
+  reference to a line that does not exist is left as it was and reported,
+  rather than being repointed at whatever now occupies that number. The
+  last line may not pass 32767, and CONT will not resume a renumbered
+  program.
 
 Sample programs
 

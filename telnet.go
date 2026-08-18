@@ -6,6 +6,7 @@ import (
 	"io"
 	"net"
 	"strconv"
+	"strings"
 	"sync"
 	"time"
 	"unicode/utf8"
@@ -50,6 +51,10 @@ type telnetConn struct {
 	skipNL  bool
 	kicked  bool
 	pending []byte
+	discard bool
+	fill    int
+	tab     bool
+	form    bool
 }
 
 func newTelnetConn(c net.Conn) *telnetConn {
@@ -59,6 +64,8 @@ func newTelnetConn(c net.Conn) *telnetConn {
 		echo: true,
 		cols: 80,
 		rows: 24,
+		tab:  true,
+		form: true,
 	}
 	_ = t.send(
 		iac, will, optEcho,
@@ -91,6 +98,10 @@ func (t *telnetConn) PollInterrupt() bool {
 			hit = true
 			continue
 		}
+		if b == 15 { // Ctrl-O
+			t.toggleDiscard()
+			continue
+		}
 		if b == iac {
 			b2, err := t.r.ReadByte()
 			if err != nil {
@@ -99,6 +110,10 @@ func (t *telnetConn) PollInterrupt() bool {
 			}
 			if b2 == ip || b2 == brk {
 				hit = true
+				continue
+			}
+			if b2 == ao {
+				t.toggleDiscard()
 				continue
 			}
 			t.pending = append(t.pending, iac, b2)
@@ -126,15 +141,48 @@ func (t *telnetConn) send(b ...byte) error {
 	return err
 }
 
+func (t *telnetConn) toggleDiscard() {
+	t.wmu.Lock()
+	t.discard = !t.discard
+	t.wmu.Unlock()
+}
+
 func (t *telnetConn) Write(p []byte) (int, error) {
+	return t.writeBytes(p, false)
+}
+
+func (t *telnetConn) writeEcho(p []byte) (int, error) {
+	return t.writeBytes(p, true)
+}
+
+func (t *telnetConn) writeBytes(p []byte, always bool) (int, error) {
 	if len(p) == 0 {
 		return 0, nil
+	}
+	t.wmu.Lock()
+	fill := t.fill
+	tab := t.tab
+	form := t.form
+	t.wmu.Unlock()
+	if !tab || !form {
+		s := string(p)
+		if !tab {
+			s = expandTabs(s, 8)
+		}
+		if !form {
+			s = strings.ReplaceAll(s, "\f", "")
+		}
+		p = []byte(s)
 	}
 	var out []byte
 	for i := 0; i < len(p); i++ {
 		b := p[i]
 		if b == '\n' && (i == 0 || p[i-1] != '\r') {
-			out = append(out, '\r', '\n')
+			out = append(out, '\r')
+			for n := 0; n < fill; n++ {
+				out = append(out, 0)
+			}
+			out = append(out, '\n')
 			continue
 		}
 		if b == iac {
@@ -142,9 +190,17 @@ func (t *telnetConn) Write(p []byte) (int, error) {
 			continue
 		}
 		out = append(out, b)
+		if b == '\r' && fill > 0 {
+			for n := 0; n < fill; n++ {
+				out = append(out, 0)
+			}
+		}
 	}
 	t.wmu.Lock()
 	defer t.wmu.Unlock()
+	if t.discard && !always {
+		return len(p), nil
+	}
 	_, err := t.c.Write(out)
 	if err != nil {
 		return 0, err
@@ -159,6 +215,14 @@ func (t *telnetConn) ReadLine(prompt string) (string, error) {
 func (t *telnetConn) SetEcho(on bool) {
 	t.wmu.Lock()
 	t.echo = on
+	t.wmu.Unlock()
+}
+
+func (t *telnetConn) SetTTY(tab, form bool, fill int) {
+	t.wmu.Lock()
+	t.tab = tab
+	t.form = form
+	t.fill = fill
 	t.wmu.Unlock()
 }
 
@@ -184,7 +248,7 @@ func (t *telnetConn) ReadPassword(prompt string) (string, error) {
 
 func (t *telnetConn) readEdit(prompt string, echo bool) (string, error) {
 	if prompt != "" {
-		if _, err := t.Write([]byte(prompt)); err != nil {
+		if _, err := t.writeEcho([]byte(prompt)); err != nil {
 			return "", err
 		}
 	}
@@ -214,12 +278,12 @@ func (t *telnetConn) readEdit(prompt string, echo bool) (string, error) {
 		case '\r':
 			t.skipNL = true
 			if echo {
-				_, _ = t.Write([]byte("\r\n"))
+				_, _ = t.writeEcho([]byte("\r\n"))
 			}
 			return string(buf), nil
 		case '\n':
 			if echo {
-				_, _ = t.Write([]byte("\r\n"))
+				_, _ = t.writeEcho([]byte("\r\n"))
 			}
 			return string(buf), nil
 		case 3: // Ctrl-C
@@ -228,11 +292,21 @@ func (t *telnetConn) readEdit(prompt string, echo bool) (string, error) {
 			if len(buf) == 0 {
 				return "", io.EOF
 			}
+		case 15: // Ctrl-O  discard output until the next Ctrl-O
+			t.toggleDiscard()
+		case 18: // Ctrl-R  redisplay the input line
+			_, _ = t.writeEcho([]byte("\r\n"))
+			if prompt != "" {
+				_, _ = t.writeEcho([]byte(prompt))
+			}
+			if len(buf) > 0 {
+				_, _ = t.writeEcho(buf)
+			}
 		case 21, 24: // Ctrl-U / Ctrl-X kill line
 			if echo {
-				_, _ = t.Write([]byte("^U\r\n"))
+				_, _ = t.writeEcho([]byte("^U\r\n"))
 				if prompt != "" {
-					_, _ = t.Write([]byte(prompt))
+					_, _ = t.writeEcho([]byte(prompt))
 				}
 			}
 			buf = buf[:0]
@@ -246,11 +320,9 @@ func (t *telnetConn) readEdit(prompt string, echo bool) (string, error) {
 			}
 			buf = buf[:len(buf)-size]
 			if echo {
-				_, _ = t.Write([]byte{8, ' ', 8})
+				_, _ = t.writeEcho([]byte{8, ' ', 8})
 			}
 		case 17, 19: // XON/XOFF
-			continue
-		case 15: // Ctrl-O
 			continue
 		default:
 			if b < 32 {
@@ -261,7 +333,7 @@ func (t *telnetConn) readEdit(prompt string, echo bool) (string, error) {
 			}
 			buf = append(buf, b)
 			if echo {
-				_, _ = t.Write([]byte{b})
+				_, _ = t.writeEcho([]byte{b})
 			}
 		}
 	}
@@ -355,6 +427,7 @@ func (t *telnetConn) readData() (byte, error) {
 				_, _ = t.Write([]byte("[" + SystemName + "]\r\n"))
 				state = 0
 			case ao:
+				t.toggleDiscard()
 				state = 0
 			default:
 				state = 0

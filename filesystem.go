@@ -88,13 +88,13 @@ type FileInfo struct {
 	Size     int64
 	Prot     int
 	Modified time.Time
+	Cluster  int
+	Alloc    int
+	Path     string
 }
 
 func (f FileInfo) Blocks() int {
-	if f.Size <= 0 {
-		return 0
-	}
-	return int((f.Size + blockSize - 1) / blockSize)
+	return fileBlocks(f.Size, f.Cluster, f.Alloc)
 }
 
 func (f FileInfo) NamePart() string {
@@ -296,13 +296,23 @@ func wildMatch(name, pattern string) bool {
 type fileMeta struct {
 	Prot     int    `json:"prot"`
 	Modified string `json:"modified"`
+	Cluster  int    `json:"cluster,omitempty"`
+	Alloc    int    `json:"alloc,omitempty"`
+}
+
+type recLock struct {
+	job int
 }
 
 type Disk struct {
-	mu    sync.Mutex
-	Root  string
-	SY    string
-	packs []*Pack
+	mu       sync.Mutex
+	Root     string
+	SY       string
+	packs    []*Pack
+	locks    map[string]recLock
+	quotaOf  func(proj, prog int) int
+	fileJobs map[string]map[int]int
+	fileExcl map[string]int
 }
 
 // setAside renames a control file the loader could not parse, so a fresh
@@ -323,7 +333,7 @@ func OpenDisk(root string) (*Disk, error) {
 	if err := os.MkdirAll(sy, 0o755); err != nil {
 		return nil, err
 	}
-	d := &Disk{Root: root, SY: sy}
+	d := &Disk{Root: root, SY: sy, locks: map[string]recLock{}, fileJobs: map[string]map[int]int{}, fileExcl: map[string]int{}}
 	if err := d.loadPacks(); err != nil {
 		return nil, err
 	}
@@ -404,8 +414,122 @@ func (d *Disk) touchMeta(folder, filename string, prot int) error {
 	d.mu.Lock()
 	defer d.mu.Unlock()
 	index := d.loadIndex(folder)
-	index[filename] = fileMeta{Prot: prot, Modified: time.Now().Format("2006-01-02T15:04:05")}
+	meta := index[filename]
+	if prot != 0 {
+		meta.Prot = prot
+	}
+	meta.Modified = time.Now().Format("2006-01-02T15:04:05")
+	index[filename] = meta
 	return d.saveIndex(folder, index)
+}
+
+func (d *Disk) SetFileAlloc(path string, cluster, alloc int) error {
+	if path == "" {
+		return nil
+	}
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	folder := filepath.Dir(path)
+	base := filepath.Base(path)
+	index := d.loadIndex(folder)
+	meta := index[base]
+	if meta.Prot == 0 {
+		meta.Prot = defaultProt
+	}
+	if cluster > 0 {
+		meta.Cluster = cluster
+	}
+	if alloc > 0 {
+		meta.Alloc = alloc
+	}
+	meta.Modified = time.Now().Format("2006-01-02T15:04:05")
+	index[base] = meta
+	return d.saveIndex(folder, index)
+}
+
+func lockKey(path string, rec int) string {
+	return strings.ToLower(path) + "#" + strconv.Itoa(rec)
+}
+
+func (d *Disk) lockRecord(path string, rec, job int) error {
+	if d == nil || path == "" || rec < 1 {
+		return nil
+	}
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	if d.locks == nil {
+		d.locks = map[string]recLock{}
+	}
+	key := lockKey(path, rec)
+	if held, ok := d.locks[key]; ok && held.job != job {
+		return fsErr("Disk block is interlocked")
+	}
+	d.locks[key] = recLock{job: job}
+	return nil
+}
+
+func (d *Disk) claimFile(path string, job int, exclusive bool) error {
+	if d == nil || path == "" {
+		return nil
+	}
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	key := strings.ToLower(path)
+	if d.fileExcl == nil {
+		d.fileExcl = map[string]int{}
+	}
+	if d.fileJobs == nil {
+		d.fileJobs = map[string]map[int]int{}
+	}
+	if held, ok := d.fileExcl[key]; ok && held != job {
+		return fsErr("Account or device in use")
+	}
+	if exclusive {
+		for j, n := range d.fileJobs[key] {
+			if j != job && n > 0 {
+				return fsErr("Account or device in use")
+			}
+		}
+		d.fileExcl[key] = job
+	}
+	if d.fileJobs[key] == nil {
+		d.fileJobs[key] = map[int]int{}
+	}
+	d.fileJobs[key][job]++
+	return nil
+}
+
+func (d *Disk) releaseFile(path string, job int) {
+	if d == nil || path == "" {
+		return
+	}
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	key := strings.ToLower(path)
+	if jobs := d.fileJobs[key]; jobs != nil {
+		jobs[job]--
+		if jobs[job] <= 0 {
+			delete(jobs, job)
+		}
+		if len(jobs) == 0 {
+			delete(d.fileJobs, key)
+		}
+	}
+	if d.fileExcl[key] == job {
+		delete(d.fileExcl, key)
+	}
+}
+
+func (d *Disk) unlockRecord(path string, rec, job int) {
+	if d == nil || path == "" {
+		return
+	}
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	key := lockKey(path, rec)
+	if held, ok := d.locks[key]; ok && (job == 0 || held.job == job) {
+		delete(d.locks, key)
+	}
 }
 
 func (d *Disk) ResolveFolder(spec FileSpec, curProj, curProg int) (string, error) {
@@ -472,7 +596,15 @@ func (d *Disk) ListDir(spec FileSpec, curProj, curProg int, privileged bool) (st
 		if meta.Prot != 0 {
 			prot = meta.Prot
 		}
-		infos = append(infos, FileInfo{Name: filename, Size: info.Size(), Prot: prot, Modified: mod})
+		infos = append(infos, FileInfo{
+			Name:     filename,
+			Size:     info.Size(),
+			Prot:     prot,
+			Modified: mod,
+			Cluster:  meta.Cluster,
+			Alloc:    meta.Alloc,
+			Path:     filepath.Join(folder, ent.Name()),
+		})
 	}
 	return fmt.Sprintf("%d,%d", proj, prog), infos, nil
 }
@@ -557,6 +689,9 @@ func (d *Disk) WriteText(spec FileSpec, curProj, curProg int, privileged bool, c
 		if err := d.checkAccess(path, proj, prog, curProj, curProg, privileged, accWrite); err != nil {
 			return err
 		}
+	}
+	if err := d.enforceQuota(filepath.Dir(path), path, proj, prog, int64(len(content))); err != nil {
+		return err
 	}
 	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
 		return err
@@ -662,9 +797,25 @@ func (d *Disk) Rename(old, new FileSpec, curProj, curProg int, privileged bool) 
 }
 
 func (d *Disk) Copy(src, dst FileSpec, curProj, curProg int, privileged bool) error {
+	return d.copyFile(src, dst, curProj, curProg, privileged, false, false)
+}
+
+// copyFile is PIP's copy: /AP concatenates onto an existing dest, /NE
+// fails if dest exists (error 16), /PROT:n overrides the source protection.
+func (d *Disk) copyFile(src, dst FileSpec, curProj, curProg int, privileged bool, appendTo, noSuper bool) error {
+	if noSuper && d.Exists(dst, curProj, curProg, privileged) {
+		return fsErr("Name or account now exists")
+	}
 	text, srcProt, err := d.readOp(src, curProj, curProg, privileged, accRead)
 	if err != nil {
 		return err
+	}
+	if appendTo && d.Exists(dst, curProj, curProg, privileged) {
+		old, _, err := d.readOp(dst, curProj, curProg, privileged, accRead)
+		if err != nil {
+			return err
+		}
+		text = old + text
 	}
 	prot := srcProt
 	if dst.ProtSet {

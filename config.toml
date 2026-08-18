@@ -1,11 +1,32 @@
 # RSTS/E V7.2-11  (PDP-11/70)
 #
-# telnet_port 23 needs root or CAP_NET_BIND_SERVICE on Unix.
-# Use 2323 (or any port >1023) if you are not root:
-#   telnet_port = 2323
+# Every setting this build understands is listed below.
+# Commented lines are defaults, or options that are not in use.
+# Uncomment a line to override. Flags on the command line still win.
 
-max_users = 25
-telnet_port = 23
-telnet_bind = "0.0.0.0"
-telnet = true
-console = true
+# Simultaneous jobs (1..63). Real RSTS/E V7.2 on an 11/70 allowed 63.
+# max_users = 25
+
+# Telnet listener. Port 23 needs root or CAP_NET_BIND_SERVICE on Unix.
+# Use 2323 (or any port >1023) if you are not root.
+# telnet_port = 23
+# telnet_port = 2323
+# telnet_bind = "0.0.0.0"
+# telnet = true
+
+# Local console on stdin/stdout (KB0:). --no-console overrides.
+# console = true
+
+# Serial lines. Unused here. Comma-separated host devices, 9600 8N1.
+# Each line is a RSTS job on its own KB: and is offered again at logoff.
+# serial = ""
+# serial = "/dev/ttyUSB0,/dev/ttyS0"
+# serial = "COM1,COM3"
+
+# Virtual disk directory. Default is ./disk, or $RSTS_DISK. --disk overrides.
+# disk = "./disk"
+
+# Console auto-login. Unused; HELLO at Bye is the usual way in.
+# guest = false
+# login = ""
+# login = "GUEST"

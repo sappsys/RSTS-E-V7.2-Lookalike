@@ -82,3 +82,18 @@ func (t *stdTerm) StopRaw() {
 		t.raw = nil
 	}
 }
+
+// overrideTerm lets TTYSET TYPE name the terminal the editor draws for,
+// so SET TYPE VT52 selects the VT52 sequences even when the Telnet
+// client called itself something else.
+type overrideTerm struct {
+	rawTerm
+	kind string
+}
+
+func (t overrideTerm) TermType() string {
+	if t.kind != "" {
+		return t.kind
+	}
+	return t.rawTerm.TermType()
+}

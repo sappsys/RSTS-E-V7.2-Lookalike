@@ -7,6 +7,8 @@ import (
 	"unicode"
 )
 
+// BasicError is a BASIC-PLUS error. Code is the ERR number when set;
+// Line is 0 when the error is not tied to a program line.
 type BasicError struct {
 	Msg  string
 	Line int // 0 means no line
@@ -24,12 +26,16 @@ func basicErr(msg string) error { return &BasicError{Msg: msg} }
 
 func basicErrAt(msg string, line int) error { return &BasicError{Msg: msg, Line: line} }
 
+func basicErrCode(msg string, code int) error {
+	return &BasicError{Msg: msg, Code: code}
+}
+
 func attachLine(err error, line int) error {
 	if err == nil {
 		return nil
 	}
 	if be, ok := err.(*BasicError); ok && be.Line == 0 && line != 0 {
-		return &BasicError{Msg: be.Msg, Line: line}
+		return &BasicError{Msg: be.Msg, Line: line, Code: be.Code}
 	}
 	return err
 }
@@ -50,6 +56,8 @@ var keywords = map[string]bool{
 	"LSET": true, "RSET": true, "RECORD": true, "RECORDSIZE": true, "UNLESS": true,
 	"MAT": true, "MAP": true, "ORGANIZATION": true, "VIRTUAL": true,
 	"FNEND": true, "FNEXIT": true,
+	"EXTEND": true, "NOEXTEND": true, "COMMON": true, "WAIT": true, "UNLOCK": true,
+	"SCALE": true,
 }
 
 var statementStarters = map[string]bool{
@@ -62,6 +70,8 @@ var statementStarters = map[string]bool{
 	"RESUME": true, "MAT": true, "MAP": true,
 	"CHAIN": true, "SLEEP": true, "KILL": true, "NAME": true,
 	"FNEND": true, "FNEXIT": true,
+	"EXTEND": true, "NOEXTEND": true, "COMMON": true, "WAIT": true, "UNLOCK": true,
+	"SCALE": true,
 }
 
 var builtins = map[string]bool{
@@ -72,6 +82,7 @@ var builtins = map[string]bool{
 	"TIME$": true, "SPACE$": true, "STRING$": true, "POS": true, "FIX": true,
 	"LOG10": true, "PI": true, "SYS": true, "ERR": true, "ERL": true,
 	"CVT%$": true, "CVT$%": true, "CVTF$": true, "CVT$F": true, "CVT$$": true,
+	"XLATE": true, "XLATE$": true, "SPEC%": true,
 	"PEEK": true, "SWAP%": true, "TIME": true, "DATE": true,
 	"NUM1$": true, "NUM$": true,
 	// String arithmetic: exact decimal held as characters.

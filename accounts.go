@@ -10,12 +10,15 @@ import (
 	"sync"
 )
 
+// Account is one PPN in accounts.json: name, password, privilege, quotas.
 type Account struct {
 	Proj       int    `json:"proj"`
 	Prog       int    `json:"prog"`
 	Name       string `json:"name"`
 	Password   string `json:"password"`
 	Privileged bool   `json:"privileged"`
+	Quota      int    `json:"quota,omitempty"`
+	JobQuota   int    `json:"job_quota,omitempty"`
 }
 
 func (a Account) PPN() string     { return fmt.Sprintf("%d,%d", a.Proj, a.Prog) }
@@ -264,6 +267,34 @@ func (db *AccountDB) List() []Account {
 	db.mu.Lock()
 	defer db.mu.Unlock()
 	return db.snapshot()
+}
+
+// SetQuota writes the disk block limit and/or logged-in job limit.
+// Negative values leave that field unchanged. Zero means no limit.
+func (db *AccountDB) SetQuota(proj, prog, quota, jobQuota int, setQuota, setJob bool) (*Account, error) {
+	db.mu.Lock()
+	defer db.mu.Unlock()
+	target := db.findPPNLocked(proj, prog)
+	if target == nil {
+		return nil, fmt.Errorf("Can't find file or account")
+	}
+	if setQuota {
+		if quota < 0 {
+			quota = 0
+		}
+		target.Quota = quota
+	}
+	if setJob {
+		if jobQuota < 0 {
+			jobQuota = 0
+		}
+		target.JobQuota = jobQuota
+	}
+	if err := db.saveLocked(); err != nil {
+		return nil, err
+	}
+	out := *target
+	return &out, nil
 }
 
 func ParsePPN(text string) (int, int, error) {

@@ -36,6 +36,7 @@ func TestRenumRewritesEveryReferenceForm(t *testing.T) {
 115 ON X GOSUB 140, 150
 120 IF A=1 THEN 130 ELSE 150
 125 ON ERROR GOTO 145
+128 RESTORE 150
 130 PRINT "ONE"
 135 RESUME 150
 140 PRINT "TWO"
@@ -50,17 +51,18 @@ func TestRenumRewritesEveryReferenceForm(t *testing.T) {
 	if len(missing) != 0 {
 		t.Fatalf("unexpected undefined references: %v", missing)
 	}
-	want := `10 GOTO 70
-20 GOSUB 90
-30 ON X GOTO 70, 90, 110
-40 ON X GOSUB 90, 110
-50 IF A=1 THEN 70 ELSE 110
-60 ON ERROR GOTO 100
-70 PRINT "ONE"
-80 RESUME 110
-90 PRINT "TWO"
-100 RESUME 70
-110 END`
+	want := `10 GOTO 80
+20 GOSUB 100
+30 ON X GOTO 80, 100, 120
+40 ON X GOSUB 100, 120
+50 IF A=1 THEN 80 ELSE 120
+60 ON ERROR GOTO 110
+70 RESTORE 120
+80 PRINT "ONE"
+90 RESUME 120
+100 PRINT "TWO"
+110 RESUME 80
+120 END`
 	if got := listing(m); got != want {
 		t.Fatalf("got:\n%s\nwant:\n%s", got, want)
 	}
@@ -95,12 +97,54 @@ func TestRenumLeavesZeroAlone(t *testing.T) {
 
 // A CHAIN line number belongs to the other program, not this one.
 func TestRenumLeavesChainLineAlone(t *testing.T) {
-	m := loadFor(t, "10 PRINT 1\n20 CHAIN \"NEXT\" LINE 10\n30 END\n")
-	if _, err := m.Renumber(100, 100); err != nil {
+	m := loadFor(t, "10 PRINT 1\n20 CHAIN \"NEXT\" LINE 999\n30 END\n")
+	missing, err := m.Renumber(100, 100)
+	if err != nil {
 		t.Fatal(err)
 	}
-	if got := listing(m); !strings.Contains(got, `CHAIN "NEXT" LINE 10`) {
+	if len(missing) != 0 {
+		t.Fatalf("CHAIN to another program was treated as a missing line: %v", missing)
+	}
+	if got := listing(m); !strings.Contains(got, `CHAIN "NEXT" LINE 999`) {
 		t.Fatalf("chain target was renumbered:\n%s", got)
+	}
+}
+
+func TestRenumRewritesSelfChainLine(t *testing.T) {
+	src := `10 PRINT 1
+20 CHAIN "T" LINE 40
+30 PRINT "SKIP"
+40 PRINT "LAND"
+50 END
+`
+	m := loadFor(t, src)
+	if _, err := m.Renumber(100, 10); err != nil {
+		t.Fatal(err)
+	}
+	got := listing(m)
+	if !strings.Contains(got, `CHAIN "T" LINE 130`) {
+		t.Fatalf("self CHAIN LINE was not rewritten:\n%s", got)
+	}
+	if strings.Contains(got, `LINE 40`) {
+		t.Fatalf("old CHAIN LINE survived:\n%s", got)
+	}
+}
+
+func TestRenumRewritesCompChainLine(t *testing.T) {
+	src := "10 REM\n20 CHAIN \"COMP\" LINE 8000\n8000 END\n"
+	m := NewMachine(IO{})
+	if err := m.LoadSource(src, "COMP"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := m.Renumber(10, 10); err != nil {
+		t.Fatal(err)
+	}
+	got := listing(m)
+	if !strings.Contains(got, `CHAIN "COMP" LINE 30`) {
+		t.Fatalf("CHAIN \"COMP\" LINE 8000 must become LINE 30:\n%s", got)
+	}
+	if strings.Contains(got, "LINE 8000") {
+		t.Fatalf("LINE 8000 survived RENUM:\n%s", got)
 	}
 }
 
@@ -160,6 +204,47 @@ func TestRenumKeepsProgramRunnable(t *testing.T) {
 	}
 	if strings.Contains(out, "SKIPPED") {
 		t.Fatalf("control flow changed: %q", out)
+	}
+}
+
+func TestRenumRewritesRestore(t *testing.T) {
+	c := &capture{}
+	m := NewMachine(IO{Write: c.write, Read: c.read})
+	src := `10 DATA 1
+20 DATA 2
+30 RESTORE 20
+40 READ X
+50 PRINT X
+60 END
+`
+	if err := m.LoadSource(src, "T"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := m.Renumber(100, 10); err != nil {
+		t.Fatal(err)
+	}
+	if got := listing(m); !strings.Contains(got, "RESTORE 110") {
+		t.Fatalf("RESTORE was not rewritten:\n%s", got)
+	}
+	if err := m.RunProgram(); err != nil {
+		t.Fatalf("run after renumber: %v\n%s", err, listing(m))
+	}
+	if strings.TrimSpace(c.out.String()) != "2" {
+		t.Fatalf("restore after renumber: %q\n%s", c.out.String(), listing(m))
+	}
+}
+
+func TestRestoreRefOffsetsSkipsBareRestore(t *testing.T) {
+	if got := restoreRefOffsets(`REM DATA READ RESTORE`); len(got) != 0 {
+		t.Fatalf("comment: %v", got)
+	}
+	if got := restoreRefOffsets(`RESTORE`); len(got) != 0 {
+		t.Fatalf("bare: %v", got)
+	}
+	text := `RESTORE 1845`
+	got := restoreRefOffsets(text)
+	if len(got) != 1 || text[got[0]:got[0]+4] != "1845" {
+		t.Fatalf("restore n: %v in %q", got, text)
 	}
 }
 

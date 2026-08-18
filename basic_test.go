@@ -122,7 +122,7 @@ func TestProgram(t *testing.T) {
 		t.Fatalf("data: %q", out)
 	}
 
-	out = runProgram(t, "10 DEF FNSQ(X) = X*X\n20 PRINT FNSQ(6)\n30 END\n")
+	out = runProgram(t, "10 EXTEND\n20 DEF FNSQ(X) = X*X\n30 PRINT FNSQ(6)\n40 END\n")
 	if strings.TrimSpace(out) != "36" {
 		t.Fatalf("fn: %q", out)
 	}

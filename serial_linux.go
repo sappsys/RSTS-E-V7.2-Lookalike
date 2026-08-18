@@ -45,3 +45,59 @@ func applySerialMode(fd int) error {
 	t.Cc[unix.VTIME] = 0
 	return unix.IoctlSetTermios(fd, unix.TCSETS, t)
 }
+
+func setSerialSpeed(f *os.File, baud int) error {
+	flag, ok := linuxBaudFlag(baud)
+	if !ok {
+		return nil
+	}
+	fd := int(f.Fd())
+	t, err := unix.IoctlGetTermios(fd, unix.TCGETS)
+	if err != nil {
+		return err
+	}
+	t.Cflag &^= unix.CBAUD
+	t.Cflag |= flag
+	return unix.IoctlSetTermios(fd, unix.TCSETS, t)
+}
+
+func linuxBaudFlag(baud int) (uint32, bool) {
+	switch baud {
+	case 50:
+		return unix.B50, true
+	case 75:
+		return unix.B75, true
+	case 110:
+		return unix.B110, true
+	case 134:
+		return unix.B134, true
+	case 150:
+		return unix.B150, true
+	case 200:
+		return unix.B200, true
+	case 300:
+		return unix.B300, true
+	case 600:
+		return unix.B600, true
+	case 1200:
+		return unix.B1200, true
+	case 1800:
+		return unix.B1800, true
+	case 2400:
+		return unix.B2400, true
+	case 4800:
+		return unix.B4800, true
+	case 9600:
+		return unix.B9600, true
+	case 19200:
+		return unix.B19200, true
+	case 38400:
+		return unix.B38400, true
+	case 57600:
+		return unix.B57600, true
+	case 115200:
+		return unix.B115200, true
+	default:
+		return 0, false
+	}
+}

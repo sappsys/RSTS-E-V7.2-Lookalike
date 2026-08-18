@@ -2,6 +2,7 @@ package rsts
 
 import (
 	"fmt"
+	"strconv"
 	"strings"
 )
 
@@ -23,14 +24,21 @@ const (
 	keyPgUp
 	keyPgDn
 	keyDelete
+	keyInsert
 )
 
 type editBuffer struct {
-	lines []string
-	cx    int // column within the current line, in bytes
-	cy    int // index into lines
-	top   int // first line on screen
-	dirty bool
+	lines      []string
+	cx         int // column within the current line, in bytes
+	cy         int // index into lines
+	top        int // first line on screen
+	dirty      bool
+	overwrite  bool
+	killBuf    string
+	killAppend bool
+	markX      int
+	markY      int
+	markSet    bool
 }
 
 func newEditBuffer(text string) *editBuffer {
@@ -80,12 +88,34 @@ func (b *editBuffer) clamp() {
 }
 
 func (b *editBuffer) insert(ch byte) {
+	b.killAppend = false
 	s := b.line()
+	if b.overwrite && b.cx < len(s) {
+		b.setLine(s[:b.cx] + string(ch) + s[b.cx+1:])
+		b.cx++
+		return
+	}
 	b.setLine(s[:b.cx] + string(ch) + s[b.cx:])
 	b.cx++
 }
 
+func (b *editBuffer) insertString(s string) {
+	s = strings.ReplaceAll(s, "\r\n", "\n")
+	s = strings.ReplaceAll(s, "\r", "\n")
+	over := b.overwrite
+	b.overwrite = false
+	for i := 0; i < len(s); i++ {
+		if s[i] == '\n' {
+			b.newline()
+		} else {
+			b.insert(s[i])
+		}
+	}
+	b.overwrite = over
+}
+
 func (b *editBuffer) newline() {
+	b.killAppend = false
 	s := b.line()
 	head, tail := s[:b.cx], s[b.cx:]
 	b.lines = append(b.lines, "")
@@ -98,6 +128,7 @@ func (b *editBuffer) newline() {
 }
 
 func (b *editBuffer) backspace() {
+	b.killAppend = false
 	if b.cx > 0 {
 		s := b.line()
 		b.setLine(s[:b.cx-1] + s[b.cx:])
@@ -117,6 +148,7 @@ func (b *editBuffer) backspace() {
 }
 
 func (b *editBuffer) deleteForward() {
+	b.killAppend = false
 	s := b.line()
 	if b.cx < len(s) {
 		b.setLine(s[:b.cx] + s[b.cx+1:])
@@ -131,17 +163,337 @@ func (b *editBuffer) deleteForward() {
 }
 
 func (b *editBuffer) deleteLine() {
+	s := b.line()
 	if len(b.lines) == 1 {
+		b.killSet(s)
 		b.setLine("")
 		b.cx = 0
 		return
 	}
+	b.killSet(s + "\n")
 	b.lines = append(b.lines[:b.cy], b.lines[b.cy+1:]...)
 	if b.cy >= len(b.lines) {
 		b.cy = len(b.lines) - 1
 	}
 	b.cx = 0
 	b.dirty = true
+}
+
+func (b *editBuffer) killSet(s string) {
+	if b.killAppend {
+		b.killBuf += s
+	} else {
+		b.killBuf = s
+	}
+	b.killAppend = true
+}
+
+func (b *editBuffer) killToBOL() {
+	if b.cx <= 0 {
+		return
+	}
+	s := b.line()
+	b.killSet(s[:b.cx])
+	b.setLine(s[b.cx:])
+	b.cx = 0
+}
+
+func (b *editBuffer) yank() {
+	if b.killBuf == "" {
+		return
+	}
+	b.insertString(b.killBuf)
+}
+
+func (b *editBuffer) openLine() {
+	b.killAppend = false
+	s := b.line()
+	head, tail := s[:b.cx], s[b.cx:]
+	b.lines = append(b.lines, "")
+	copy(b.lines[b.cy+2:], b.lines[b.cy+1:])
+	b.lines[b.cy] = head
+	b.lines[b.cy+1] = tail
+	b.dirty = true
+}
+
+func (b *editBuffer) transpose() {
+	s := b.line()
+	if len(s) < 2 {
+		return
+	}
+	i := b.cx
+	if i == 0 {
+		i = 1
+	}
+	if i >= len(s) {
+		a, c := s[len(s)-2], s[len(s)-1]
+		b.setLine(s[:len(s)-2] + string(c) + string(a))
+		b.cx = len(s)
+		b.killAppend = false
+		return
+	}
+	a, c := s[i-1], s[i]
+	b.setLine(s[:i-1] + string(c) + string(a) + s[i+1:])
+	b.cx = i + 1
+	b.killAppend = false
+}
+
+func isWordChar(c byte) bool {
+	return (c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z') ||
+		(c >= '0' && c <= '9') || c == '$' || c == '%'
+}
+
+func (b *editBuffer) wordForward() {
+	b.clamp()
+	for {
+		s := b.line()
+		if b.cx < len(s) {
+			if isWordChar(s[b.cx]) {
+				for b.cx < len(s) && isWordChar(s[b.cx]) {
+					b.cx++
+				}
+				return
+			}
+			b.cx++
+			continue
+		}
+		if b.cy+1 >= len(b.lines) {
+			return
+		}
+		b.cy++
+		b.cx = 0
+	}
+}
+
+func (b *editBuffer) wordBack() {
+	b.clamp()
+	for {
+		if b.cx > 0 {
+			b.cx--
+			s := b.line()
+			if !isWordChar(s[b.cx]) {
+				continue
+			}
+			for b.cx > 0 && isWordChar(s[b.cx-1]) {
+				b.cx--
+			}
+			return
+		}
+		if b.cy == 0 {
+			return
+		}
+		b.cy--
+		b.cx = len(b.line())
+	}
+}
+
+func (b *editBuffer) setMark() {
+	b.clamp()
+	b.markX = b.cx
+	b.markY = b.cy
+	b.markSet = true
+}
+
+func (b *editBuffer) orderedPos() (y1, x1, y2, x2 int) {
+	y1, x1 = b.markY, b.markX
+	y2, x2 = b.cy, b.cx
+	if y1 > y2 || (y1 == y2 && x1 > x2) {
+		return y2, x2, y1, x1
+	}
+	return
+}
+
+func (b *editBuffer) regionText() string {
+	if !b.markSet {
+		return ""
+	}
+	y1, x1, y2, x2 := b.orderedPos()
+	if y1 < 0 {
+		y1 = 0
+	}
+	if y2 >= len(b.lines) {
+		y2 = len(b.lines) - 1
+	}
+	if y1 == y2 {
+		line := b.lines[y1]
+		if x1 > len(line) {
+			x1 = len(line)
+		}
+		if x2 > len(line) {
+			x2 = len(line)
+		}
+		if x1 > x2 {
+			x1, x2 = x2, x1
+		}
+		return line[x1:x2]
+	}
+	var sb strings.Builder
+	l1 := b.lines[y1]
+	if x1 > len(l1) {
+		x1 = len(l1)
+	}
+	sb.WriteString(l1[x1:])
+	sb.WriteByte('\n')
+	for y := y1 + 1; y < y2; y++ {
+		sb.WriteString(b.lines[y])
+		sb.WriteByte('\n')
+	}
+	l2 := b.lines[y2]
+	if x2 > len(l2) {
+		x2 = len(l2)
+	}
+	sb.WriteString(l2[:x2])
+	return sb.String()
+}
+
+func (b *editBuffer) copyRegion() bool {
+	if !b.markSet {
+		return false
+	}
+	b.killBuf = b.regionText()
+	b.killAppend = false
+	return true
+}
+
+func (b *editBuffer) killRegion() bool {
+	if !b.markSet {
+		return false
+	}
+	y1, x1, y2, x2 := b.orderedPos()
+	if y1 < 0 {
+		y1 = 0
+		x1 = 0
+	}
+	if y2 >= len(b.lines) {
+		y2 = len(b.lines) - 1
+		x2 = len(b.lines[y2])
+	}
+	text := b.regionText()
+	head := b.lines[y1]
+	if x1 > len(head) {
+		x1 = len(head)
+	}
+	tail := b.lines[y2]
+	if x2 > len(tail) {
+		x2 = len(tail)
+	}
+	b.killBuf = text
+	b.killAppend = true
+	joined := head[:x1] + tail[x2:]
+	newLines := append([]string{}, b.lines[:y1]...)
+	newLines = append(newLines, joined)
+	newLines = append(newLines, b.lines[y2+1:]...)
+	if len(newLines) == 0 {
+		newLines = []string{""}
+	}
+	b.lines = newLines
+	b.cy = y1
+	b.cx = x1
+	b.dirty = true
+	b.markSet = false
+	return true
+}
+
+func (b *editBuffer) matchAt(pat string) bool {
+	if pat == "" {
+		return false
+	}
+	s := b.line()
+	if b.cx < 0 || b.cx+len(pat) > len(s) {
+		return false
+	}
+	return s[b.cx:b.cx+len(pat)] == pat
+}
+
+func (b *editBuffer) replaceAt(pat, repl string) {
+	if !b.matchAt(pat) {
+		return
+	}
+	s := b.line()
+	b.setLine(s[:b.cx] + s[b.cx+len(pat):])
+	over := b.overwrite
+	b.overwrite = false
+	b.insertString(repl)
+	b.overwrite = over
+}
+
+// find locates pat. skip starts just after the cursor so Find again
+// does not land on the same match. wrap reports that the search
+// continued from the other end of the buffer.
+func (b *editBuffer) find(pat string, forward, skip bool) (ok, wrapped bool) {
+	if pat == "" || len(b.lines) == 0 {
+		return false, false
+	}
+	b.clamp()
+	n := len(b.lines)
+	if forward {
+		y, x := b.cy, b.cx
+		if skip {
+			x++
+		}
+		for pass := 0; pass < 2; pass++ {
+			for y < n {
+				line := b.lines[y]
+				if x < 0 {
+					x = 0
+				}
+				if x <= len(line) {
+					if i := strings.Index(line[x:], pat); i >= 0 {
+						b.cy = y
+						b.cx = x + i
+						return true, pass == 1
+					}
+				}
+				y++
+				x = 0
+			}
+			y, x = 0, 0
+		}
+		return false, false
+	}
+	y, x := b.cy, b.cx
+	if skip {
+		x--
+	}
+	for pass := 0; pass < 2; pass++ {
+		for y >= 0 {
+			line := b.lines[y]
+			if x > len(line) {
+				x = len(line)
+			}
+			if x < 0 {
+				y--
+				if y >= 0 {
+					x = len(b.lines[y])
+				}
+				continue
+			}
+			end := x + len(pat)
+			if end > len(line) {
+				end = len(line)
+			}
+			i := strings.LastIndex(line[:end], pat)
+			for i > x {
+				if i == 0 {
+					i = -1
+					break
+				}
+				i = strings.LastIndex(line[:i], pat)
+			}
+			if i >= 0 {
+				b.cy = y
+				b.cx = i
+				return true, pass == 1
+			}
+			y--
+			if y >= 0 {
+				x = len(b.lines[y])
+			}
+		}
+		y = n - 1
+		x = len(b.lines[y])
+	}
+	return false, false
 }
 
 // scroll keeps the cursor on screen, given how many text rows there are.
@@ -218,6 +570,7 @@ type editor struct {
 	cols    int
 	rows    int
 	afterCR bool
+	search  string
 	// save is called for Ctrl-W and Ctrl-X. Returning an error leaves the
 	// editor open with the error on the status line, so a program with a
 	// syntax error is not lost.
@@ -274,7 +627,7 @@ func (e *editor) drawStatus() {
 		mark, e.title, e.buf.cy+1, len(e.buf.lines), e.buf.cx+1)
 	right := e.status
 	if right == "" {
-		right = "^W write  ^X write+exit  ^C quit  ^K kill line"
+		right = "^W write  ^X exit  ^S find  ^\\ repl  ^Y yank"
 	}
 	gap := e.cols - len(left) - len(right) - 1
 	if gap < 1 {
@@ -357,6 +710,8 @@ func (e *editor) readKey() (int, error) {
 			switch num {
 			case 1, 7:
 				return keyHome, nil
+			case 2:
+				return keyInsert, nil
 			case 3:
 				return keyDelete, nil
 			case 4, 8:
@@ -435,8 +790,61 @@ func (e *editor) Run() (bool, error) {
 			return saved, nil
 		case 12: // Ctrl-L, redraw
 			e.status = ""
+		case 19: // Ctrl-S, find
+			e.doFind(true)
+		case 18: // Ctrl-R, reverse find
+			e.doFind(false)
+		case 28: // Ctrl-\, replace
+			e.doReplace()
+		case 7: // Ctrl-G, goto line
+			e.doGoto()
+		case 25: // Ctrl-Y, yank
+			if e.buf.killBuf == "" {
+				e.status = "nothing to yank"
+			} else {
+				e.buf.yank()
+				e.status = ""
+			}
 		case 11: // Ctrl-K, kill line
 			e.buf.deleteLine()
+			e.status = ""
+		case 21: // Ctrl-U, kill to start of line
+			e.buf.killToBOL()
+			e.status = ""
+		case 15: // Ctrl-O, open line
+			e.buf.openLine()
+			e.status = ""
+		case 20: // Ctrl-T, transpose
+			e.buf.transpose()
+			e.status = ""
+		case 29: // Ctrl-], word forward
+			e.buf.wordForward()
+			e.status = ""
+		case 31: // Ctrl-_, word back
+			e.buf.wordBack()
+			e.status = ""
+		case 30: // Ctrl-^, set mark
+			e.buf.setMark()
+			e.status = "mark set"
+		case 22: // Ctrl-V, copy region
+			if e.buf.copyRegion() {
+				e.status = "copied"
+			} else {
+				e.status = "no mark"
+			}
+		case 17: // Ctrl-Q, cut region
+			if e.buf.killRegion() {
+				e.status = "cut"
+			} else {
+				e.status = "no mark"
+			}
+		case keyInsert:
+			e.buf.overwrite = !e.buf.overwrite
+			if e.buf.overwrite {
+				e.status = "overwrite"
+			} else {
+				e.status = "insert"
+			}
 		case 1: // Ctrl-A
 			e.buf.cx = 0
 		case 5: // Ctrl-E
@@ -486,6 +894,139 @@ func (e *editor) Run() (bool, error) {
 		}
 		e.buf.clamp()
 	}
+}
+
+func (e *editor) readPrompt(prompt string) (string, bool) {
+	var buf []byte
+	for {
+		e.status = prompt + string(buf)
+		e.draw()
+		k, err := e.readKey()
+		if err != nil {
+			return "", false
+		}
+		switch {
+		case k == 7 || k == 3:
+			e.status = "cancelled"
+			return "", false
+		case k == '\r' || k == '\n':
+			e.status = ""
+			return string(buf), true
+		case k == 8 || k == 127 || k == keyDelete:
+			if len(buf) > 0 {
+				buf = buf[:len(buf)-1]
+			}
+		case k >= 32 && k < 127:
+			buf = append(buf, byte(k))
+		}
+	}
+}
+
+func (e *editor) doFind(forward bool) {
+	prompt := "Find: "
+	if !forward {
+		prompt = "Reverse: "
+	}
+	s, ok := e.readPrompt(prompt)
+	if !ok {
+		return
+	}
+	skip := false
+	if s == "" {
+		s = e.search
+		skip = true
+	}
+	if s == "" {
+		e.status = "no search"
+		return
+	}
+	e.search = s
+	found, wrapped := e.buf.find(s, forward, skip)
+	if !found {
+		e.status = "not found"
+		return
+	}
+	if wrapped {
+		e.status = "wrapped"
+		return
+	}
+	e.status = ""
+}
+
+func (e *editor) doReplace() {
+	find, ok := e.readPrompt("Replace: ")
+	if !ok {
+		return
+	}
+	if find == "" {
+		find = e.search
+	}
+	if find == "" {
+		e.status = "no search"
+		return
+	}
+	repl, ok := e.readPrompt("With: ")
+	if !ok {
+		return
+	}
+	e.search = find
+	n := 0
+	all := false
+	skip := false
+	for {
+		found, wrapped := e.buf.find(find, true, skip)
+		if !found || wrapped {
+			break
+		}
+		skip = true
+		if !all {
+			e.status = "Replace? Y/N/A/^G"
+			e.draw()
+			k, err := e.readKey()
+			if err != nil {
+				break
+			}
+			switch {
+			case k == 'y' || k == 'Y':
+				e.buf.replaceAt(find, repl)
+				n++
+			case k == 'n' || k == 'N':
+			case k == 'a' || k == 'A':
+				all = true
+				e.buf.replaceAt(find, repl)
+				n++
+			case k == 7 || k == 3 || k == 'q' || k == 'Q':
+				e.status = fmt.Sprintf("%d replaced", n)
+				return
+			default:
+				skip = false
+			}
+		} else {
+			e.buf.replaceAt(find, repl)
+			n++
+		}
+	}
+	if n == 0 {
+		e.status = "not found"
+		return
+	}
+	e.status = fmt.Sprintf("%d replaced", n)
+}
+
+func (e *editor) doGoto() {
+	s, ok := e.readPrompt("Line: ")
+	if !ok {
+		return
+	}
+	n, err := strconv.Atoi(strings.TrimSpace(s))
+	if err != nil || n < 1 {
+		e.status = "bad line"
+		return
+	}
+	e.buf.cy = n - 1
+	e.buf.cx = 0
+	e.buf.clamp()
+	e.status = ""
 }
 
 func (e *editor) doSave() error {

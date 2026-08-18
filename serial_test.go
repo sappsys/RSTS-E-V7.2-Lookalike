@@ -47,4 +47,12 @@ func TestConfigSerialDefaultsToNone(t *testing.T) {
 	if !strings.Contains(defaultConfigTOML, "serial") {
 		t.Fatal("the default config.toml should mention serial")
 	}
+	for _, key := range []string{
+		"max_users", "telnet_port", "telnet_bind", "telnet", "console",
+		"serial", "disk", "guest", "login",
+	} {
+		if !strings.Contains(defaultConfigTOML, key+" =") {
+			t.Fatalf("the default config.toml should list %s", key)
+		}
+	}
 }

@@ -94,6 +94,13 @@ const (
 	opKill
 	opName
 	opDimVirt
+	opCommon
+	opWait
+	opUnlock
+	opIfEnd
+	opMidSet
+	opScale
+	opRestoreAt
 )
 
 const (
@@ -105,9 +112,12 @@ const (
 )
 
 const (
-	openRecSize = 1
-	openVirtual = 2
-	openMap     = 4
+	openRecSize  = 1
+	openVirtual  = 2
+	openMap      = 4
+	openModeN    = 8
+	openCluster  = 16
+	openFileSize = 32
 )
 
 const (
@@ -141,13 +151,14 @@ type pcodeFn struct {
 }
 
 type pcodeImage struct {
-	Strings []string
-	Nums    []float64
-	Data    []value
-	Lines   []pcodeLine
-	Fns     []pcodeFn
-	Code    []byte
-	HaltIP  int
+	Strings   []string
+	Nums      []float64
+	Data      []value
+	DataLines []int
+	Lines     []pcodeLine
+	Fns       []pcodeFn
+	Code      []byte
+	HaltIP    int
 }
 
 func (img *pcodeImage) lineIP(line int) (int, bool) {
@@ -202,6 +213,10 @@ func (img *pcodeImage) Marshal() []byte {
 	b = putU32(b, uint32(img.HaltIP))
 	b = putU32(b, uint32(len(img.Code)))
 	b = append(b, img.Code...)
+	b = putU32(b, uint32(len(img.DataLines)))
+	for _, n := range img.DataLines {
+		b = putU32(b, uint32(n))
+	}
 	return b
 }
 
@@ -325,6 +340,20 @@ func unmarshalPcode(raw string) (*pcodeImage, error) {
 		return nil, basicErr("Compiled file")
 	}
 	img.Code = append([]byte(nil), p[off:off+int(n)]...)
+	off += int(n)
+	if off+4 <= len(p) {
+		nl, err := u32()
+		if err != nil {
+			return nil, err
+		}
+		for i := uint32(0); i < nl; i++ {
+			ln, err := u32()
+			if err != nil {
+				return nil, err
+			}
+			img.DataLines = append(img.DataLines, int(ln))
+		}
+	}
 	return img, nil
 }
 

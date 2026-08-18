@@ -2,6 +2,7 @@ package rsts
 
 import (
 	"bufio"
+	"errors"
 	"fmt"
 	"io"
 	"math"
@@ -48,6 +49,7 @@ type jump struct {
 
 type chanFile struct {
 	file       *os.File
+	path       string
 	mode       string
 	r          *bufio.Reader
 	recSize    int
@@ -62,6 +64,12 @@ type chanFile struct {
 	class      int
 	dev        charDev
 	onClose    func()
+	modeN      int
+	cluster    int
+	alloc      int
+	lockedRec  int
+	eof        bool
+	tentative  bool
 }
 
 // charDev is a channel that is not a disk file: a terminal, the printer,
@@ -103,6 +111,7 @@ type IO struct {
 	Load          func(name string) error
 	Delete        func(path string) error
 	Rename        func(old, new string) error
+	Disk          *Disk
 	PPN           string
 	Job           int
 	AccountName   string
@@ -111,7 +120,17 @@ type IO struct {
 	KB            string
 	Width         int
 	Echo          bool
+	Quota         int
 	PollInterrupt func() bool
+	// FIP hooks used by SYS(CHR$(6%)+…). A nil func is a no-op zeros return.
+	Hangup    func() error
+	Assign    func(dev, logical string) error
+	Deassign  func(name string) error
+	Broadcast func(to, text string) error
+	SetLogins func(off bool) error
+	LoginsOff bool
+	TermType  string
+	Speed     int
 }
 
 type Machine struct {
@@ -122,6 +141,7 @@ type Machine struct {
 	arrays      map[string]*arrayInfo
 	functions   map[string]fnDef
 	data        []value
+	dataLines   []int
 	dataPtr     int
 	gosub       []int
 	forStack    []forFrame
@@ -154,14 +174,21 @@ type Machine struct {
 	chainTo     string
 	chainLine   int
 	virtNext    map[int]int
+	common      []string
+	commonSaved []commonSave
+	inputWait   float64
+	trapCtrlC   bool
+	scale       int
 	// The variables a program reads after an operation: characters
 	// transferred, the channel's state, the determinant left by MAT INV,
 	// and the size MAT INPUT read.
-	recount int
-	status  int
-	det     float64
-	matNum  int
-	matNum2 int
+	recount   int
+	status    int
+	det       float64
+	matNum    int
+	matNum2   int
+	extend    bool // keyboard/program EXTEND; NEW resets to NOEXTEND
+	openModeN int  // MODE word of the OPEN in progress; openDiskFile reads this
 }
 
 func NewMachine(io IO) *Machine {
@@ -187,6 +214,7 @@ func (m *Machine) resetRuntime() {
 	m.arrays = map[string]*arrayInfo{}
 	m.functions = map[string]fnDef{}
 	m.data = nil
+	m.dataLines = nil
 	m.dataPtr = 0
 	m.gosub = nil
 	m.forStack = nil
@@ -209,6 +237,9 @@ func (m *Machine) resetRuntime() {
 	m.det = 0
 	m.matNum = 0
 	m.matNum2 = 0
+	m.common = nil
+	m.inputWait = 0
+	m.trapCtrlC = false
 }
 
 // CPUTime is the time this job has spent executing BASIC, which is what
@@ -256,9 +287,42 @@ func (m *Machine) readInput(prompt string) (string, error) {
 		return "", m.err("I/O error")
 	}
 	start := time.Now()
-	s, err := m.IO.Read(prompt)
-	m.noteWait(start)
-	return s, err
+	defer m.noteWait(start)
+	if m.inputWait <= 0 {
+		s, err := m.IO.Read(prompt)
+		if errors.Is(err, ErrInterrupt) {
+			return "", m.interruptErr()
+		}
+		return s, err
+	}
+	type result struct {
+		s   string
+		err error
+	}
+	ch := make(chan result, 1)
+	go func() {
+		s, err := m.IO.Read(prompt)
+		ch <- result{s, err}
+	}()
+	deadline := time.NewTimer(time.Duration(m.inputWait * float64(time.Second)))
+	defer deadline.Stop()
+	tick := time.NewTicker(20 * time.Millisecond)
+	defer tick.Stop()
+	for {
+		select {
+		case r := <-ch:
+			if errors.Is(r.err, ErrInterrupt) {
+				return "", m.interruptErr()
+			}
+			return r.s, r.err
+		case <-deadline.C:
+			return "", m.errCode("Keyboard wait exhausted", 15)
+		case <-tick.C:
+			if m.Interrupted() {
+				return "", m.interruptErr()
+			}
+		}
+	}
 }
 
 func (m *Machine) Interrupt() {
@@ -289,7 +353,15 @@ func (m *Machine) clearInterrupt() {
 
 func (m *Machine) CloseAllFiles() {
 	for _, f := range m.Files {
+		m.unlockChan(f)
+		path := f.path
+		tent := f.tentative
 		closeChanFile(f)
+		// OPEN MODE 64 is tentative: NEW/CLEAR/RUN reset discards the
+		// host file. An explicit CLOSE commits it.
+		if tent && path != "" {
+			_ = os.Remove(path)
+		}
 	}
 	m.Files = map[int]*chanFile{}
 }
@@ -304,7 +376,10 @@ func (m *Machine) ClearProgram(name string) {
 	m.PrivImage = false
 	m.Image = nil
 	m.editSeq++
+	m.commonSaved = nil
 	m.resetRuntime()
+	m.scale = 0
+	m.extend = false
 }
 
 func (m *Machine) StoreLine(number int, text string) error {
@@ -316,7 +391,7 @@ func (m *Machine) StoreLine(number int, text string) error {
 		m.editSeq++
 		return nil
 	}
-	if _, err := parseSourceLine(text); err != nil {
+	if _, err := parseSourceLine(text, m.extendBefore(number)); err != nil {
 		return err
 	}
 	if m.Program == nil {
@@ -325,6 +400,21 @@ func (m *Machine) StoreLine(number int, text string) error {
 	m.Program[number] = text
 	m.editSeq++
 	return nil
+}
+
+func (m *Machine) extendBefore(number int) bool {
+	extend := false
+	for _, num := range m.lineOrder() {
+		if num >= number {
+			break
+		}
+		stmts, err := parseSourceLine(m.Program[num], extend)
+		if err != nil {
+			continue
+		}
+		extend = applyExtendMode(extend, stmts)
+	}
+	return extend
 }
 
 func (m *Machine) lineOrder() []int {
@@ -360,6 +450,11 @@ func (m *Machine) SourceText() string {
 
 func (m *Machine) LoadSource(text, name string) error {
 	m.ClearProgram(name)
+	type srcLine struct {
+		num  int
+		rest string
+	}
+	var lines []srcLine
 	for _, raw := range strings.Split(text, "\n") {
 		line := strings.TrimRight(raw, "\r")
 		if strings.TrimSpace(line) == "" {
@@ -378,7 +473,11 @@ func (m *Machine) LoadSource(text, name string) error {
 		}
 		num, _ := strconv.Atoi(line[i:j])
 		rest := strings.TrimRight(strings.TrimLeft(line[j:], " \t"), " \t")
-		if err := m.StoreLine(num, rest); err != nil {
+		lines = append(lines, srcLine{num: num, rest: rest})
+	}
+	sort.Slice(lines, func(i, j int) bool { return lines[i].num < lines[j].num })
+	for _, ln := range lines {
+		if err := m.StoreLine(ln.num, ln.rest); err != nil {
 			return err
 		}
 	}
@@ -410,15 +509,19 @@ func (m *Machine) LoadCompiled(text, name string, privImage bool) error {
 
 func (m *Machine) collectData() {
 	m.data = nil
+	m.dataLines = nil
 	m.dataPtr = 0
 	for _, num := range m.lineOrder() {
-		stmts, err := parseSourceLine(m.Program[num])
+		stmts, err := parseSourceLine(m.Program[num], true)
 		if err != nil {
 			continue
 		}
 		for _, s := range stmts {
 			if s.kind == stData {
 				m.data = append(m.data, s.data...)
+				for range s.data {
+					m.dataLines = append(m.dataLines, num)
+				}
 			}
 		}
 	}
@@ -473,9 +576,13 @@ func (m *Machine) takeChain() error {
 	if m.IO.Load == nil {
 		return basicErr("Can't find file or account")
 	}
+	saved := m.commonSaved
+	savedScale := m.scale
 	if err := m.IO.Load(name); err != nil {
 		return err
 	}
+	m.commonSaved = saved
+	m.scale = savedScale
 	m.startLine = line
 	return nil
 }
@@ -521,7 +628,7 @@ func (m *Machine) findIndex(order []int, line int) (int, error) {
 func (m *Machine) skipBlock(index int, order []int) (int, error) {
 	depth := 1
 	for j := index + 1; j < len(order); j++ {
-		stmts, err := parseSourceLine(m.Program[order[j]])
+		stmts, err := parseSourceLine(m.Program[order[j]], true)
 		if err != nil {
 			continue
 		}
@@ -596,7 +703,12 @@ func (m *Machine) doNext(varName string, order []int) (int, error) {
 }
 
 func (m *Machine) ExecImmediate(text string) error {
-	img, err := compileImmediate(text)
+	stmts, err := parseSourceLine(text, m.extend)
+	if err != nil {
+		return err
+	}
+	m.extend = applyExtendMode(m.extend, stmts)
+	img, err := compileStmtList(stmts, true)
 	if err != nil {
 		return err
 	}
@@ -723,6 +835,14 @@ func (m *Machine) execCore(s stmt) (jump, error) {
 		}
 		return jump{}, nil
 	case stRestore:
+		if s.expr != nil {
+			n, err := m.evalNum(s.expr)
+			if err != nil {
+				return jump{}, err
+			}
+			m.restoreAt(int(n))
+			return jump{}, nil
+		}
 		m.dataPtr = 0
 		return jump{}, nil
 	case stEnd:
@@ -742,6 +862,7 @@ func (m *Machine) execCore(s stmt) (jump, error) {
 		}
 		n := int(ch)
 		if f := m.Files[n]; f != nil {
+			m.unlockChan(f)
 			closeChanFile(f)
 		}
 		delete(m.Files, n)
@@ -971,7 +1092,20 @@ func (m *Machine) doOpen(s stmt) error {
 	if m.IO.Open == nil {
 		return m.err("I/O error")
 	}
-	if err := m.IO.Open(m, int(ch), path, s.mode); err != nil {
+	modeN := 0
+	if s.modeN != nil {
+		n, err := m.evalNum(s.modeN)
+		if err != nil {
+			return err
+		}
+		modeN = int(n)
+	}
+	// Set before IO.Open so MODE 128 (no supersede) and 256 (read
+	// regardless) are visible in openDiskFile.
+	m.openModeN = modeN
+	err = m.IO.Open(m, int(ch), path, s.mode)
+	m.openModeN = 0
+	if err != nil {
 		return err
 	}
 	f := m.Files[int(ch)]
@@ -991,7 +1125,146 @@ func (m *Machine) doOpen(s stmt) error {
 	}
 	f.orgVirtual = s.org == "VIRTUAL"
 	f.mapName = s.mapName
+	f.modeN = modeN
+	if s.clusSize != nil {
+		n, err := m.evalNum(s.clusSize)
+		if err != nil {
+			return err
+		}
+		if n < 1 {
+			n = 1
+		}
+		f.cluster = int(n)
+	}
+	if s.fileSize != nil {
+		n, err := m.evalNum(s.fileSize)
+		if err != nil {
+			return err
+		}
+		if n < 0 {
+			n = 0
+		}
+		f.alloc = int(n)
+		if err := m.applyFileAlloc(f); err != nil {
+			return err
+		}
+	} else if f.cluster > 0 {
+		m.applyFileAlloc(f)
+	}
 	m.status = f.statusWord(int(ch))
+	return m.applyOpenMode(f)
+}
+
+// V7 disk OPEN MODE word (BASIC-PLUS Programming Manual). Bits we honour:
+// 1 update, 2 append, 8 wait if in use, 16 exclusive, 32 contiguous,
+// 64 tentative (deleted unless CLOSE), 128 no supersede (error 16),
+// 256 read regardless of protection.
+const (
+	modeUpdate      = 1
+	modeAppend      = 2
+	modeWait        = 8
+	modeExclusive   = 16
+	modeContiguous  = 32
+	modeTentative   = 64
+	modeNoSupersede = 128
+	modeReadAny     = 256
+)
+
+func (m *Machine) restoreAt(line int) {
+	if line <= 0 || len(m.dataLines) == 0 {
+		m.dataPtr = 0
+		return
+	}
+	for i, ln := range m.dataLines {
+		if ln >= line {
+			m.dataPtr = i
+			return
+		}
+	}
+	m.dataPtr = len(m.data)
+}
+
+func (f *chanFile) canRead() bool {
+	if f == nil {
+		return false
+	}
+	if f.mode == "INPUT" || f.mode == "UPDATE" || f.mode == "RANDOM" {
+		return true
+	}
+	return f.modeN&modeUpdate != 0
+}
+
+func (f *chanFile) canWrite() bool {
+	if f == nil {
+		return false
+	}
+	if f.mode == "OUTPUT" || f.mode == "APPEND" || f.mode == "UPDATE" || f.mode == "RANDOM" {
+		return true
+	}
+	return f.modeN&modeUpdate != 0
+}
+
+func (m *Machine) applyOpenMode(f *chanFile) error {
+	if f == nil {
+		return nil
+	}
+	if f.modeN&modeAppend != 0 && f.file != nil && f.mode != "OUTPUT" {
+		if _, err := f.file.Seek(0, io.SeekEnd); err != nil {
+			return m.err("I/O error")
+		}
+		if f.mode == "INPUT" {
+			f.mode = "APPEND"
+		}
+	}
+	if f.modeN&modeUpdate != 0 && f.file != nil {
+		path := f.path
+		if path == "" {
+			path = f.file.Name()
+		}
+		if f.mode == "INPUT" || f.mode == "OUTPUT" || f.mode == "APPEND" {
+			_ = f.file.Close()
+			nf, err := os.OpenFile(path, os.O_RDWR, 0o644)
+			if err != nil {
+				nf, err = os.OpenFile(path, os.O_RDWR|os.O_CREATE, 0o644)
+			}
+			if err != nil {
+				return m.err("I/O error")
+			}
+			f.file = nf
+			f.path = path
+			f.r = bufio.NewReader(nf)
+		}
+		f.mode = "UPDATE"
+	}
+	if f.modeN&modeContiguous != 0 && f.cluster < 1 {
+		f.cluster = 1
+	}
+	if f.modeN&modeTentative != 0 {
+		f.tentative = true
+	}
+	if f.file != nil && m.IO.Disk != nil && f.path != "" {
+		for {
+			err := m.IO.Disk.claimFile(f.path, m.IO.Job, f.modeN&modeExclusive != 0)
+			if err == nil {
+				prev := f.onClose
+				path, job, disk := f.path, m.IO.Job, m.IO.Disk
+				f.onClose = func() {
+					disk.releaseFile(path, job)
+					if prev != nil {
+						prev()
+					}
+				}
+				break
+			}
+			if f.modeN&modeWait == 0 {
+				return m.errCode("Account or device in use", 3)
+			}
+			if m.Interrupted() {
+				return m.interruptErr()
+			}
+			time.Sleep(50 * time.Millisecond)
+		}
+	}
 	return nil
 }
 
@@ -1095,6 +1368,26 @@ func (m *Machine) evalIndices(es []expr) ([]int, error) {
 	return out, nil
 }
 
+func (m *Machine) setScale(n int) error {
+	if n < 0 || n > 6 {
+		return m.err("Illegal number")
+	}
+	m.scale = n
+	return nil
+}
+
+func (m *Machine) applyScale(n float64) float64 {
+	if m == nil || m.scale <= 0 {
+		return n
+	}
+	p := math.Pow(10, float64(m.scale))
+	return math.Round(n*p) / p
+}
+
+func (m *Machine) numScaled(n float64) value {
+	return numValue(m.applyScale(n))
+}
+
 func (m *Machine) binOp(op string, left, right value) (value, error) {
 	switch op {
 	case "+":
@@ -1109,22 +1402,28 @@ func (m *Machine) binOp(op string, left, right value) (value, error) {
 		if err != nil {
 			return value{}, err
 		}
-		return numValue(a + b), nil
+		return m.numScaled(a + b), nil
 	case "-":
 		a, b, err := m.nums(left, right)
-		return numValue(a - b), err
+		if err != nil {
+			return value{}, err
+		}
+		return m.numScaled(a - b), nil
 	case "*":
 		a, b, err := m.nums(left, right)
-		return numValue(a * b), err
+		if err != nil {
+			return value{}, err
+		}
+		return m.numScaled(a * b), nil
 	case "/":
 		a, b, err := m.nums(left, right)
 		if err != nil {
 			return value{}, err
 		}
 		if b == 0 {
-			return value{}, m.err("Division by 0")
+			return value{}, m.err("Floating point error")
 		}
-		return numValue(a / b), nil
+		return m.numScaled(a / b), nil
 	case `\`:
 		a, b, err := m.nums(left, right)
 		if err != nil {
@@ -1638,6 +1937,28 @@ func (m *Machine) call(name string, args []value) (value, error) {
 		return numValue(cvtDollarF(args_(0))), nil
 	case "CVT$$":
 		return strValue(cvtDollarDollar(args_(0))), nil
+	case "XLATE", "XLATE$":
+		if len(args) < 2 {
+			return value{}, m.err("Argument count")
+		}
+		return strValue(xlateString(args_(0), args_(1))), nil
+	case "SPEC%":
+		if len(args) < 2 {
+			return value{}, m.err("Argument count")
+		}
+		ch, err := argn(0)
+		if err != nil {
+			return value{}, err
+		}
+		fn, err := argn(1)
+		if err != nil {
+			return value{}, err
+		}
+		n, err := m.specPercent(int(ch), int(fn))
+		if err != nil {
+			return value{}, err
+		}
+		return numValue(float64(n)), nil
 	default:
 		return value{}, m.err("Undefined function")
 	}
@@ -1673,7 +1994,11 @@ func (m *Machine) coerceVar(name string, v value) (value, error) {
 	if v.isStr {
 		return value{}, m.err("Type mismatch")
 	}
-	return v, nil
+	n, err := m.numVal(v)
+	if err != nil {
+		return value{}, err
+	}
+	return m.numScaled(n), nil
 }
 
 func (m *Machine) coerceInput(target *varRef, v value) (value, error) {
@@ -1952,11 +2277,13 @@ func (m *Machine) fileWrite(ch int, text string) error {
 	if f.dev != nil {
 		return f.dev.devWrite(text)
 	}
-	if f.mode != "OUTPUT" && f.mode != "APPEND" {
+	if !f.canWrite() {
 		return m.err("I/O error")
 	}
-	_, err := f.file.WriteString(text)
-	return err
+	if _, err := f.file.WriteString(text); err != nil {
+		return err
+	}
+	return m.checkWriteQuota(f)
 }
 
 func (m *Machine) fileReadLine(ch int) (string, error) {
@@ -1965,25 +2292,40 @@ func (m *Machine) fileReadLine(ch int) (string, error) {
 		return "", m.err("I/O error")
 	}
 	if f.pk != nil {
-		line, err := f.pk.ctrlReadLine()
+		line, err := f.pk.ctrlReadLine(m.Interrupted)
 		if err == io.EOF {
+			f.eof = true
 			return "", m.err("End of file on device")
+		}
+		if errors.Is(err, ErrInterrupt) {
+			return "", m.interruptErr()
 		}
 		return line, err
 	}
 	if f.dev != nil {
 		line, err := f.dev.devReadLine()
 		if err == io.EOF {
+			f.eof = true
 			return "", m.err("End of file on device")
+		}
+		if errors.Is(err, ErrInterrupt) {
+			return "", m.interruptErr()
 		}
 		return line, err
 	}
-	if f.mode != "INPUT" {
+	if !f.canRead() {
 		return "", m.err("I/O error")
+	}
+	if err := m.lockSeqBlock(f); err != nil {
+		return "", err
+	}
+	if f.r == nil {
+		f.r = bufio.NewReader(f.file)
 	}
 	line, err := f.r.ReadString('\n')
 	if err != nil && !(err == io.EOF && line != "") {
 		if err == io.EOF {
+			f.eof = true
 			return "", m.err("End of file on device")
 		}
 		return "", err
@@ -2035,6 +2377,14 @@ func (m *Machine) err(msg string) error {
 		return basicErrAt(msg, m.CurrentLine)
 	}
 	return basicErr(msg)
+}
+
+func (m *Machine) errCode(msg string, code int) error {
+	e := &BasicError{Msg: msg, Code: code}
+	if m.HasLine {
+		e.Line = m.CurrentLine
+	}
+	return e
 }
 
 func NowDate() string { return time.Now().Format("02-Jan-06") }

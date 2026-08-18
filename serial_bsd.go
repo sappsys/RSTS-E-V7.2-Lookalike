@@ -45,3 +45,18 @@ func applySerialMode(fd int) error {
 	t.Ospeed = 9600
 	return unix.IoctlSetTermios(fd, unix.TIOCSETA, t)
 }
+
+func setSerialSpeed(f *os.File, baud int) error {
+	n, ok := canonicalBaud(baud)
+	if !ok {
+		return nil
+	}
+	fd := int(f.Fd())
+	t, err := unix.IoctlGetTermios(fd, unix.TIOCGETA)
+	if err != nil {
+		return err
+	}
+	t.Ispeed = uint32(n)
+	t.Ospeed = uint32(n)
+	return unix.IoctlSetTermios(fd, unix.TIOCSETA, t)
+}

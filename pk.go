@@ -17,18 +17,27 @@ type pkLink struct {
 	toCtrl bytes.Buffer
 	dead   bool
 	kicked bool
+	wake   chan struct{}
 }
 
 func newPKLink() *pkLink {
-	p := &pkLink{}
+	p := &pkLink{wake: make(chan struct{}, 1)}
 	p.cv = sync.NewCond(&p.mu)
 	return p
+}
+
+func (p *pkLink) signal() {
+	select {
+	case p.wake <- struct{}{}:
+	default:
+	}
+	p.cv.Broadcast()
 }
 
 func (p *pkLink) Hangup() {
 	p.mu.Lock()
 	p.dead = true
-	p.cv.Broadcast()
+	p.signal()
 	p.mu.Unlock()
 }
 
@@ -40,11 +49,11 @@ func (p *pkLink) ctrlWrite(s string) error {
 	}
 	s = strings.ReplaceAll(s, "\n", "\r")
 	p.toJob.WriteString(s)
-	p.cv.Broadcast()
+	p.signal()
 	return nil
 }
 
-func (p *pkLink) ctrlReadLine() (string, error) {
+func (p *pkLink) ctrlReadLine(interrupted func() bool) (string, error) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	for {
@@ -62,8 +71,24 @@ func (p *pkLink) ctrlReadLine() (string, error) {
 			}
 			return "", io.EOF
 		}
-		p.cv.Wait()
+		if interrupted != nil && interrupted() {
+			return "", ErrInterrupt
+		}
+		p.mu.Unlock()
+		timer := time.NewTimer(50 * time.Millisecond)
+		select {
+		case <-timer.C:
+		case <-p.wake:
+		}
+		timer.Stop()
+		p.mu.Lock()
 	}
+}
+
+func (p *pkLink) atEnd() bool {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	return p.dead && p.toCtrl.Len() == 0
 }
 
 func (p *pkLink) jobWrite(b []byte) (int, error) {
@@ -73,7 +98,7 @@ func (p *pkLink) jobWrite(b []byte) (int, error) {
 		return 0, io.EOF
 	}
 	n, _ := p.toCtrl.Write(b)
-	p.cv.Broadcast()
+	p.signal()
 	return n, nil
 }
 
@@ -97,7 +122,7 @@ func (p *pkLink) jobReadByte() (byte, error) {
 func (p *pkLink) kick() {
 	p.mu.Lock()
 	p.kicked = true
-	p.cv.Broadcast()
+	p.signal()
 	p.mu.Unlock()
 }
 

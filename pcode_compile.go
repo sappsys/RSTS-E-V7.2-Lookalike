@@ -43,6 +43,7 @@ type compiler struct {
 	fns       []pendingFn
 	defs      []openDef
 	immediate bool
+	line      int
 }
 
 func newCompiler() *compiler {
@@ -59,14 +60,17 @@ func compileProgram(prog map[int]string) (*pcodeImage, error) {
 		keys = append(keys, k)
 	}
 	sort.Ints(keys)
+	extend := false
 	for _, num := range keys {
-		stmts, err := parseSourceLine(prog[num])
+		stmts, err := parseSourceLine(prog[num], extend)
 		if err != nil {
 			return nil, attachLine(err, num)
 		}
+		extend = applyExtendMode(extend, stmts)
 		c.emit(opLine)
 		c.emitU32(uint32(num))
 		c.img.Lines = append(c.img.Lines, pcodeLine{Num: num, IP: len(c.img.Code) - 5})
+		c.line = num
 		for _, s := range stmts {
 			if err := c.stmt(s); err != nil {
 				return nil, attachLine(err, num)
@@ -87,13 +91,9 @@ func compileProgram(prog map[int]string) (*pcodeImage, error) {
 	return c.img, nil
 }
 
-func compileImmediate(text string) (*pcodeImage, error) {
-	stmts, err := parseSourceLine(text)
-	if err != nil {
-		return nil, err
-	}
+func compileStmtList(stmts []stmt, immediate bool) (*pcodeImage, error) {
 	c := newCompiler()
-	c.immediate = true
+	c.immediate = immediate
 	for _, s := range stmts {
 		if err := c.stmt(s); err != nil {
 			return nil, err
@@ -270,6 +270,7 @@ func (c *compiler) core(s stmt) error {
 				c.intern(v.str)
 			}
 			c.img.Data = append(c.img.Data, v)
+			c.img.DataLines = append(c.img.DataLines, c.line)
 		}
 		return nil
 	case stLet:
@@ -397,6 +398,13 @@ func (c *compiler) core(s stmt) error {
 		}
 		return nil
 	case stRestore:
+		if s.expr != nil {
+			if err := c.expr(s.expr); err != nil {
+				return err
+			}
+			c.emit(opRestoreAt)
+			return nil
+		}
 		c.emit(opRestore)
 		return nil
 	case stEnd:
@@ -424,6 +432,24 @@ func (c *compiler) core(s stmt) error {
 		}
 		if s.mapName != "" {
 			flags |= openMap
+		}
+		if s.modeN != nil {
+			if err := c.expr(s.modeN); err != nil {
+				return err
+			}
+			flags |= openModeN
+		}
+		if s.clusSize != nil {
+			if err := c.expr(s.clusSize); err != nil {
+				return err
+			}
+			flags |= openCluster
+		}
+		if s.fileSize != nil {
+			if err := c.expr(s.fileSize); err != nil {
+				return err
+			}
+			flags |= openFileSize
 		}
 		c.emit(opOpen)
 		c.emitU16(c.intern(s.mode))
@@ -637,6 +663,52 @@ func (c *compiler) core(s stmt) error {
 		}
 		c.emit(opName)
 		return nil
+	case stExtend:
+		return nil
+	case stCommon:
+		return c.common(s)
+	case stWait:
+		if err := c.expr(s.expr); err != nil {
+			return err
+		}
+		c.emit(opWait)
+		return nil
+	case stUnlock:
+		if err := c.expr(s.channel); err != nil {
+			return err
+		}
+		c.emit(opUnlock)
+		return nil
+	case stScale:
+		if err := c.expr(s.expr); err != nil {
+			return err
+		}
+		c.emit(opScale)
+		return nil
+	case stMid:
+		if err := c.expr(s.expr); err != nil {
+			return err
+		}
+		if err := c.expr(s.start); err != nil {
+			return err
+		}
+		flags := byte(0)
+		if s.end != nil {
+			if err := c.expr(s.end); err != nil {
+				return err
+			}
+			flags = 1
+		}
+		for _, ix := range s.target.indices {
+			if err := c.expr(ix); err != nil {
+				return err
+			}
+		}
+		c.emit(opMidSet)
+		c.emitU16(c.intern(s.target.name))
+		c.emitU8(byte(len(s.target.indices)))
+		c.emitU8(flags)
+		return nil
 	default:
 		return basicErr("Syntax error")
 	}
@@ -691,8 +763,37 @@ func (c *compiler) closeLoop(loop compileLoop, nextName string) {
 	}
 }
 
+func (c *compiler) common(s stmt) error {
+	for _, a := range s.arrays {
+		for _, b := range a.bounds {
+			if err := c.expr(b); err != nil {
+				return err
+			}
+		}
+		if a.strLen != nil {
+			if err := c.expr(a.strLen); err != nil {
+				return err
+			}
+		}
+		c.emit(opCommon)
+		c.emitU16(c.intern(a.name))
+		c.emitU8(byte(len(a.bounds)))
+		if a.strLen != nil {
+			c.emitU8(1)
+		} else {
+			c.emitU8(0)
+		}
+	}
+	return nil
+}
+
 func (c *compiler) ifStmt(s stmt) error {
-	if err := c.expr(s.cond); err != nil {
+	if s.hasChan && s.cond == nil {
+		if err := c.expr(s.channel); err != nil {
+			return err
+		}
+		c.emit(opIfEnd)
+	} else if err := c.expr(s.cond); err != nil {
 		return err
 	}
 	elseJump := c.emitJump(opJumpFalse)

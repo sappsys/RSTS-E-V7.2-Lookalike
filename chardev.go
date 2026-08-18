@@ -42,6 +42,10 @@ func parseCharDevice(path string) (dev string, unit int, unitSet bool, rest stri
 		return dev, unit, unitSet, rest, true
 	case "NL":
 		return dev, unit, unitSet, "", rest == ""
+	case "MT", "MM", "MS":
+		return "MT", unit, unitSet, rest, true
+	case "PP", "PR", "CR", "DX", "DT":
+		return dev, unit, unitSet, rest, true
 	}
 	return "", 0, false, "", false
 }
@@ -55,6 +59,10 @@ type kbDev struct {
 }
 
 func (d *kbDev) devWrite(text string) error {
+	if d.self != nil {
+		d.self.write(text, false)
+		return nil
+	}
 	_, err := fmt.Fprint(d.out, text)
 	return err
 }
@@ -130,8 +138,17 @@ func (s *Shell) openCharDevice(m *Machine, channel int, dev string, unit int, un
 		}
 		if f := m.Files[channel]; f != nil {
 			f.class = devPrinter
+			prev := f.onClose
+			f.onClose = func() {
+				if prev != nil {
+					prev()
+				}
+				s.enqueueClosedPrinter(f.path)
+			}
 		}
 		return nil
+	case "MT", "PP", "PR", "CR", "DX", "DT":
+		return s.openImageDevice(m, channel, dev, unit, rest, mode)
 	}
 	return basicErr("Not a valid device")
 }
