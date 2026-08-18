@@ -202,6 +202,11 @@ SYS(CHR$(n)+...): 1=system, 2=PPN, 3=job, 4=program, 5=date,
      -3=UU.TB1  -12=UU.TB2  -10=UU.TRM (width/echo)
   7=time, 9=pack SY
 ERR and ERL are the last trapped error number and line.
+String arithmetic is exact to any length, which is how money was kept:
+  SUM$(a$,b$)  DIF$(a$,b$)  PROD$(a$,b$)  QUO$(a$,b$)
+  COMP%(a$,b$) -1, 0 or 1    PLACE$(a$,n) round at the nth place
+  RAD$(n)      the three characters packed in a Radix-50 word
+
 CVT%$ / CVT$% pack 16-bit integers.
 CVTF$ / CVT$F pack IEEE float32 (the real 11/70 FPP was FP11-C).
 `,

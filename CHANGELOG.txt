@@ -26,6 +26,19 @@ BASIC-PLUS
       30   IF N > 1 THEN FNF = N * FNF(N-1)
       40 FNEND
 
+  String arithmetic, which is how a business program of the period kept
+  money: a number held as characters can be any length and is exact.
+
+      SUM$(a$,b$)   DIF$(a$,b$)   PROD$(a$,b$)   QUO$(a$,b$)
+      COMP%(a$,b$)  -1, 0 or 1
+      PLACE$(a$,n)  round at the nth place, negative for tens upward
+      RAD$(n)       the three characters packed in a Radix-50 word
+
+  Ten dimes added with SUM$ come to exactly 1.00, where a float would
+  drift. Values are carried as an integer and a scale, so nothing is
+  rounded except where the operation says so; QUO$ carries a division
+  that does not come out exactly to thirty digits.
+
   Character devices open like files, so a program can be handed a
   channel and not care what is on the end of it:
 

@@ -74,6 +74,9 @@ var builtins = map[string]bool{
 	"CVT%$": true, "CVT$%": true, "CVTF$": true, "CVT$F": true, "CVT$$": true,
 	"PEEK": true, "SWAP%": true, "TIME": true, "DATE": true,
 	"NUM1$": true, "NUM$": true,
+	// String arithmetic: exact decimal held as characters.
+	"SUM$": true, "DIF$": true, "PROD$": true, "QUO$": true,
+	"COMP%": true, "PLACE$": true, "RAD$": true,
 	// Set by the last operation rather than called with arguments.
 	"RECOUNT": true, "STATUS": true, "DET": true, "NUM": true, "NUM2": true,
 }

@@ -1562,6 +1562,54 @@ func (m *Machine) call(name string, args []value) (value, error) {
 		return numValue(float64(m.errNum)), nil
 	case "ERL":
 		return numValue(float64(m.errLine)), nil
+	case "SUM$", "DIF$", "PROD$", "QUO$":
+		if len(args) < 2 {
+			return value{}, m.err("Argument count")
+		}
+		var out string
+		var err error
+		switch name {
+		case "SUM$":
+			out, err = strSum(m.strVal(args[0]), m.strVal(args[1]))
+		case "DIF$":
+			out, err = strDif(m.strVal(args[0]), m.strVal(args[1]))
+		case "PROD$":
+			out, err = strProd(m.strVal(args[0]), m.strVal(args[1]))
+		default:
+			out, err = strQuo(m.strVal(args[0]), m.strVal(args[1]))
+		}
+		if err != nil {
+			return value{}, m.err(strings.TrimPrefix(err.Error(), "?"))
+		}
+		return strValue(out), nil
+	case "COMP%":
+		if len(args) < 2 {
+			return value{}, m.err("Argument count")
+		}
+		n, err := strComp(m.strVal(args[0]), m.strVal(args[1]))
+		if err != nil {
+			return value{}, m.err(strings.TrimPrefix(err.Error(), "?"))
+		}
+		return numValue(n), nil
+	case "PLACE$":
+		if len(args) < 2 {
+			return value{}, m.err("Argument count")
+		}
+		at, err := argn(1)
+		if err != nil {
+			return value{}, err
+		}
+		out, perr := strPlace(m.strVal(args[0]), int(at))
+		if perr != nil {
+			return value{}, m.err(strings.TrimPrefix(perr.Error(), "?"))
+		}
+		return strValue(out), nil
+	case "RAD$":
+		n, err := argn(0)
+		if err != nil {
+			return value{}, err
+		}
+		return strValue(rad50String(n)), nil
 	case "RECOUNT":
 		return numValue(float64(m.recount)), nil
 	case "STATUS":

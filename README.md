@@ -485,7 +485,11 @@ Statements: `LET`, `PRINT`, `INPUT`, `LINE INPUT`, `PRINT USING`, `GOTO`, `GOSUB
 
 Modifiers (rightmost is outermost): `IF`, `UNLESS`, `WHILE`, `UNTIL`, `FOR`. Several statements on one line are separated by `\`. Integer divide is also `\` inside an expression. Relational true is **-1**, false is **0**. Types: `$` string, `%` integer.
 
-Functions: `ABS INT FIX SGN SQR SIN COS TAN ATN LOG EXP RND PI ERR ERL PEEK SWAP% TIME DATE LEN LEFT$ RIGHT$ MID$ INSTR CHR$ ASC STR$ VAL NUM1$ NUM$ SPACE$ STRING$ DATE$ TIME$ TAB SPC POS SYS CVT%$ CVT$% CVTF$ CVT$F CVT$$`.
+Functions: `ABS INT FIX SGN SQR SIN COS TAN ATN LOG EXP RND PI ERR ERL PEEK SWAP% TIME DATE LEN LEFT$ RIGHT$ MID$ INSTR CHR$ ASC STR$ VAL NUM1$ NUM$ SPACE$ STRING$ DATE$ TIME$ TAB SPC POS SYS CVT%$ CVT$% CVTF$ CVT$F CVT$$ RAD$`.
+
+Variables set by the last operation: `RECOUNT`, `STATUS`, `DET`, `NUM`, `NUM2`.
+
+String arithmetic is exact to any length, which is how money was kept before anyone trusted a two-word float: `SUM$`, `DIF$`, `PROD$`, `QUO$`, `COMP%`, `PLACE$`. Ten dimes added with `SUM$` come to exactly `1.00`.
 
 `RIGHT$(s,n)` is from character *n* to the end (BASIC-PLUS, not last-*n*).
 
