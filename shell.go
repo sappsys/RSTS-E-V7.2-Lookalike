@@ -144,6 +144,8 @@ past 32767. CONT will not resume a program after RENUM.
   IF ... THEN ... ELSE
   FOR ... TO ... STEP / NEXT
   WHILE ... / NEXT   UNTIL ... / NEXT
+  DEF FNx = expr        one line
+  DEF FNx(a,b) ... FNEND    many lines, FNEXIT returns early
   DIM  DIM #n, A(m)[=len]  DATA  READ  RESTORE  CHANGE  MAT
   MAT READ/PRINT/INPUT  MAT C = A+B / A-B / A*B / (K)*A
   MAT C = ZER / CON / IDN / TRN(A) / INV(A)
@@ -176,6 +178,12 @@ Relational true is -1, false is 0
 String:  LEN LEFT$ RIGHT$ MID$ INSTR CHR$ ASC STR$ VAL NUM1$ NUM$
          SPACE$ STRING$ DATE$ TIME$ TAB SPC POS SYS
          CVT%$ CVT$% CVTF$ CVT$F CVT$$
+
+RECOUNT          characters the last INPUT or GET transferred
+STATUS           the last OPEN: device class low, channel high
+                 1 disk  2 keyboard  4 printer  8 tape  16 null
+DET              determinant, set by MAT INV
+NUM  NUM2        rows and columns, set by MAT INPUT
 
 DATE / DATE(0)   integer date  (year-1970)*1000 + yearday
 TIME / TIME(0)   seconds since midnight (KW11-L 60 Hz clock)
@@ -905,7 +913,7 @@ func (s *Shell) openBasicFile(m *Machine, channel int, path, mode string) error 
 	if err != nil {
 		return err
 	}
-	cf := &chanFile{file: f, mode: mode}
+	cf := &chanFile{file: f, mode: mode, class: devDisk}
 	if mode == "INPUT" {
 		cf.r = bufio.NewReader(f)
 	}

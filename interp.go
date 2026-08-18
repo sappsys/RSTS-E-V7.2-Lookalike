@@ -59,6 +59,7 @@ type chanFile struct {
 	pkUnit     int
 	orgVirtual bool
 	mapName    string
+	class      int
 	onClose    func()
 }
 
@@ -143,6 +144,14 @@ type Machine struct {
 	chainTo     string
 	chainLine   int
 	virtNext    map[int]int
+	// The variables a program reads after an operation: characters
+	// transferred, the channel's state, the determinant left by MAT INV,
+	// and the size MAT INPUT read.
+	recount int
+	status  int
+	det     float64
+	matNum  int
+	matNum2 int
 }
 
 func NewMachine(io IO) *Machine {
@@ -185,6 +194,11 @@ func (m *Machine) resetRuntime() {
 	m.currentMap = ""
 	m.paused = nil
 	m.virtNext = map[int]int{}
+	m.recount = 0
+	m.status = 0
+	m.det = 0
+	m.matNum = 0
+	m.matNum2 = 0
 }
 
 // CPUTime is the time this job has spent executing BASIC, which is what
@@ -875,6 +889,7 @@ func (m *Machine) doInput(s stmt) error {
 		if err != nil {
 			return err
 		}
+		m.recount = len(raw)
 		values := splitInput(raw)
 		for i, t := range s.targets {
 			if i >= len(values) {
@@ -902,6 +917,7 @@ func (m *Machine) doInput(s stmt) error {
 		if err != nil {
 			return err
 		}
+		m.recount = len(raw)
 		cv, err := m.coerceInput(t, value{isStr: true, str: raw})
 		if err != nil {
 			return err
@@ -928,6 +944,7 @@ func (m *Machine) doLineInput(s stmt) error {
 	if err != nil {
 		return err
 	}
+	m.recount = len(raw)
 	return m.assign(s.target, strValue(raw))
 }
 
@@ -964,7 +981,27 @@ func (m *Machine) doOpen(s stmt) error {
 	}
 	f.orgVirtual = s.org == "VIRTUAL"
 	f.mapName = s.mapName
+	m.status = f.statusWord(int(ch))
 	return nil
+}
+
+// STATUS after an OPEN says what the channel is attached to: the device
+// class in the low byte and the channel number in the high byte, the
+// shape RSTS used. A program normally tests the class bits.
+const (
+	devDisk     = 1
+	devKeyboard = 2
+	devPrinter  = 4
+	devTape     = 8
+	devNull     = 16
+)
+
+func (f *chanFile) statusWord(channel int) int {
+	class := f.class
+	if class == 0 {
+		class = devDisk
+	}
+	return class | channel<<8
 }
 
 func (m *Machine) eval(e expr) (value, error) {
@@ -1515,6 +1552,16 @@ func (m *Machine) call(name string, args []value) (value, error) {
 		return numValue(float64(m.errNum)), nil
 	case "ERL":
 		return numValue(float64(m.errLine)), nil
+	case "RECOUNT":
+		return numValue(float64(m.recount)), nil
+	case "STATUS":
+		return numValue(float64(m.status)), nil
+	case "DET":
+		return numValue(m.det), nil
+	case "NUM":
+		return numValue(float64(m.matNum)), nil
+	case "NUM2":
+		return numValue(float64(m.matNum2)), nil
 	case "CVT%$":
 		n, err := argn(0)
 		if err != nil {

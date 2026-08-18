@@ -200,6 +200,12 @@ func (m *Machine) matInput(name string) error {
 		}
 		vals = append(vals, splitInput(raw)...)
 	}
+	// NUM and NUM2 report the shape that was read.
+	if twoD {
+		m.matNum, m.matNum2 = rows, cols
+	} else {
+		m.matNum, m.matNum2 = cols, 0
+	}
 	n := 0
 	for i := 1; i <= rows; i++ {
 		for j := 1; j <= cols; j++ {
@@ -493,6 +499,8 @@ func (m *Machine) matInv(dest, src string) error {
 		}
 		a[i][n+i] = 1
 	}
+	// The determinant falls out of the elimination, and DET reports it.
+	det := 1.0
 	for col := 0; col < n; col++ {
 		pivot := col
 		best := absFloat(a[col][col])
@@ -503,10 +511,15 @@ func (m *Machine) matInv(dest, src string) error {
 			}
 		}
 		if best < 1e-12 {
+			m.det = 0
 			return m.err("Can't invert matrix")
+		}
+		if pivot != col {
+			det = -det
 		}
 		a[col], a[pivot] = a[pivot], a[col]
 		div := a[col][col]
+		det *= div
 		for j := 0; j < 2*n; j++ {
 			a[col][j] /= div
 		}
@@ -531,6 +544,7 @@ func (m *Machine) matInv(dest, src string) error {
 			}
 		}
 	}
+	m.det = det
 	return nil
 }
 

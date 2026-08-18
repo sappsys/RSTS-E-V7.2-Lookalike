@@ -14,6 +14,25 @@ login banner both report it.
 V7.2-11   in progress
 ---------------------
 
+BASIC-PLUS
+
+  Multi-line functions. A DEF with no = on its line runs on until FNEND,
+  and its value is whatever the body assigned to the function's own name.
+  FNEXIT returns early. They recurse: the result variable is saved and
+  restored across a call along with the parameters.
+
+      10 DEF FNF(N)
+      20   FNF = 1
+      30   IF N > 1 THEN FNF = N * FNF(N-1)
+      40 FNEND
+
+  The variables a program reads after an operation:
+
+      RECOUNT   characters the last INPUT or GET transferred
+      STATUS    the last OPEN: device class low byte, channel high byte
+      DET       determinant, set by MAT INV
+      NUM NUM2  rows and columns, set by MAT INPUT
+
 Serial lines
 
   config.toml takes a comma separated list of serial devices:

@@ -293,7 +293,7 @@ func (s *Shell) openPK(m *Machine, channel, unit int) error {
 	if m.Files == nil {
 		m.Files = map[int]*chanFile{}
 	}
-	m.Files[channel] = &chanFile{mode: "PK", pk: link, pkJob: job.Num, pkUnit: u}
+	m.Files[channel] = &chanFile{mode: "PK", pk: link, pkJob: job.Num, pkUnit: u, class: devKeyboard}
 	return nil
 }
 

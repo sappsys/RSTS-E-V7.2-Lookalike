@@ -792,8 +792,12 @@ func (vm *pvm) call() error {
 		if len(args) != len(fn.Params) {
 			return vm.m.err("Argument count")
 		}
-		fr := pfnFrame{retIP: vm.pc, params: fn.Params, saved: map[string]value{}, present: map[string]bool{}}
-		for _, p := range fn.Params {
+		// The parameters are restored on return, and so is the variable
+		// that carries a multi-line function's result, so that a
+		// function calling itself does not clobber the outer call.
+		fr := pfnFrame{retIP: vm.pc, params: append(append([]string{}, fn.Params...), name),
+			saved: map[string]value{}, present: map[string]bool{}}
+		for _, p := range fr.params {
 			if v, ok := vm.m.vars[p]; ok {
 				fr.saved[p] = v
 				fr.present[p] = true

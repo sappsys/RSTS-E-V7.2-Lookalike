@@ -49,6 +49,7 @@ var keywords = map[string]bool{
 	"CHANGE": true, "USING": true, "GET": true, "PUT": true, "FIELD": true,
 	"LSET": true, "RSET": true, "RECORD": true, "RECORDSIZE": true, "UNLESS": true,
 	"MAT": true, "MAP": true, "ORGANIZATION": true, "VIRTUAL": true,
+	"FNEND": true, "FNEXIT": true,
 }
 
 var statementStarters = map[string]bool{
@@ -60,6 +61,7 @@ var statementStarters = map[string]bool{
 	"GET": true, "PUT": true, "FIELD": true, "LSET": true, "RSET": true,
 	"RESUME": true, "MAT": true, "MAP": true,
 	"CHAIN": true, "SLEEP": true, "KILL": true, "NAME": true,
+	"FNEND": true, "FNEXIT": true,
 }
 
 var builtins = map[string]bool{
@@ -72,6 +74,8 @@ var builtins = map[string]bool{
 	"CVT%$": true, "CVT$%": true, "CVTF$": true, "CVT$F": true, "CVT$$": true,
 	"PEEK": true, "SWAP%": true, "TIME": true, "DATE": true,
 	"NUM1$": true, "NUM$": true,
+	// Set by the last operation rather than called with arguments.
+	"RECOUNT": true, "STATUS": true, "DET": true, "NUM": true, "NUM2": true,
 }
 
 type tokKind int

@@ -29,11 +29,19 @@ type pendingFn struct {
 	patch  int
 }
 
+// A multi-line DEF is compiled where it stands, with a jump around the
+// body so that falling off the line above does not run it.
+type openDef struct {
+	name string
+	skip int
+}
+
 type compiler struct {
 	img       *pcodeImage
 	strMap    map[string]uint16
 	loops     []compileLoop
 	fns       []pendingFn
+	defs      []openDef
 	immediate bool
 }
 
@@ -67,6 +75,9 @@ func compileProgram(prog map[int]string) (*pcodeImage, error) {
 	}
 	if len(c.loops) > 0 {
 		return nil, basicErr("FOR or WHILE without NEXT")
+	}
+	if len(c.defs) > 0 {
+		return nil, basicErr("DEF without FNEND")
 	}
 	c.emit(opHalt)
 	c.img.HaltIP = len(c.img.Code) - 1
@@ -471,6 +482,39 @@ func (c *compiler) core(s stmt) error {
 		}
 		patch := c.holeU32()
 		c.fns = append(c.fns, pendingFn{name: s.fnName, params: s.params, body: s.fnExpr, patch: patch})
+		return nil
+	case stDefMulti:
+		if c.immediate {
+			return basicErr("Illegal in immediate mode")
+		}
+		if len(c.defs) > 0 {
+			return basicErr("DEF within DEF")
+		}
+		c.emit(opDefFn)
+		c.emitU16(c.intern(s.fnName))
+		c.emitU8(byte(len(s.params)))
+		for _, p := range s.params {
+			c.emitU16(c.intern(p))
+		}
+		body := c.holeU32()
+		skip := c.emitJump(opJump)
+		c.patchU32(body, uint32(len(c.img.Code)))
+		c.defs = append(c.defs, openDef{name: s.fnName, skip: skip})
+		return nil
+	case stFnExit:
+		if len(c.defs) == 0 {
+			return basicErr("FNEXIT without DEF")
+		}
+		c.fnResult(c.defs[len(c.defs)-1].name)
+		return nil
+	case stFnEnd:
+		if len(c.defs) == 0 {
+			return basicErr("FNEND without DEF")
+		}
+		open := c.defs[len(c.defs)-1]
+		c.defs = c.defs[:len(c.defs)-1]
+		c.fnResult(open.name)
+		c.patchU32(open.skip, uint32(len(c.img.Code)))
 		return nil
 	case stOnError:
 		if err := c.expr(s.expr); err != nil {
@@ -1031,6 +1075,15 @@ func binOpCode(op string) (byte, bool) {
 		return opOr, true
 	}
 	return 0, false
+}
+
+// fnResult returns from a multi-line function. Its value is whatever the
+// body assigned to the function's own name, which is how BASIC-PLUS
+// carries a result out of a DEF.
+func (c *compiler) fnResult(name string) {
+	c.emit(opLoadVar)
+	c.emitU16(c.intern(name))
+	c.emit(opFnReturn)
 }
 
 func (c *compiler) emitFuncs() error {

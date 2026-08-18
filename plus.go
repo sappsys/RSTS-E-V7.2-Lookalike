@@ -444,6 +444,7 @@ func (m *Machine) doGet(s stmt) error {
 		return m.err("I/O error")
 	}
 	f.recNo = rec
+	m.recount = n
 	if area := m.fileMap(f); area != nil {
 		return m.unpackMap(area)
 	}

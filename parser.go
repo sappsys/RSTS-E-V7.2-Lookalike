@@ -69,6 +69,9 @@ const (
 	stRset
 	stMat
 	stMap
+	stDefMulti
+	stFnEnd
+	stFnExit
 	stChain
 	stSleep
 	stKill
@@ -353,6 +356,12 @@ func (p *parser) parseBareStatement() (stmt, error) {
 			return p.parseOn()
 		case "DEF":
 			return p.parseDef()
+		case "FNEND":
+			p.i++
+			return stmt{kind: stFnEnd}, nil
+		case "FNEXIT":
+			p.i++
+			return stmt{kind: stFnExit}, nil
 		case "LINE":
 			return p.parseLineInput()
 		case "CHANGE":
@@ -1002,8 +1011,11 @@ func (p *parser) parseDef() (stmt, error) {
 			return stmt{}, err
 		}
 	}
-	if err := p.expectOp("="); err != nil {
-		return stmt{}, err
+	// With no = the definition runs on over the following lines until
+	// FNEND, and the value is whatever the body last assigned to the
+	// function's own name.
+	if !p.acceptOp("=") {
+		return stmt{kind: stDefMulti, fnName: name, params: params}, nil
 	}
 	body, err := p.parseExpr()
 	if err != nil {
@@ -1303,7 +1315,8 @@ func (p *parser) modifierStart() bool {
 
 func canModify(k stmtKind) bool {
 	switch k {
-	case stRem, stData, stFor, stNext, stWhile, stUntil, stDef, stOnError, stResume:
+	case stRem, stData, stFor, stNext, stWhile, stUntil, stDef, stOnError, stResume,
+		stDefMulti, stFnEnd:
 		return false
 	}
 	return true
