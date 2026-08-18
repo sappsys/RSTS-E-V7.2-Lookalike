@@ -340,6 +340,9 @@ func closeChanFile(f *chanFile) {
 	if f.pk != nil {
 		f.pk.Hangup()
 	}
+	if f.dev != nil {
+		f.dev.devClose()
+	}
 	if f.file != nil {
 		_ = f.file.Close()
 	}

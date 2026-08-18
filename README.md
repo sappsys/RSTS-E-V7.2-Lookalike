@@ -501,6 +501,8 @@ Virtual arrays: `OPEN "FILE.DAT" AS FILE 1` then `DIM #1, A%(100)` or `DIM #1, A
 
 After `HELLO`, `[1,2]NOTICE.TXT` is typed, then `LOGIN.BAS` or `START.BAS` in the account is `RUN` if present.
 
+Character devices open like files: `OPEN "KB:" AS FILE 1` is your own terminal and `KB3:` is another one (privileged, like `FORCE`), `LP:` is the line printer, spooled to `LPn.LST` in your account because this 11/70 has no printer attached, and `NL:` is the null device, which swallows output and is at end of file at once.
+
 `OPEN "PK:" AS FILE n` assigns a pseudo keyboard and forks a job. `PRINT #n` sends keystrokes; `INPUT #n` / `LINE INPUT #n` reads output; `CLOSE #n` hangs up the child. Demo: `OLD PK` then `RUN` on GUEST.
 
 ## COMPILE and bytecode

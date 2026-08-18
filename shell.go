@@ -153,6 +153,9 @@ past 32767. CONT will not resume a program after RENUM.
   OPEN ... [FOR INPUT/OUTPUT/APPEND] AS FILE #n [, RECORDSIZE n]
   OPEN ... AS FILE #n, ORGANIZATION VIRTUAL
   OPEN "PK:" AS FILE n      spawn a job on a pseudo keyboard
+  OPEN "KB:" AS FILE n      this terminal, KBn: another one (priv)
+  OPEN "LP:" AS FILE n      the printer, spooled to LPn.LST
+  OPEN "NL:" AS FILE n      the null device
   MAP (name) LONG X%, STRING A$ = n
   GET #n [, RECORD n]   PUT #n [, RECORD n]
   FIELD #n, n AS A$   LSET / RSET
@@ -877,10 +880,17 @@ func (s *Shell) openBasicFile(m *Machine, channel int, path, mode string) error 
 	if s.Account == nil {
 		return basicErr("I/O error")
 	}
+	if dev, unit, unitSet, rest, ok := parseCharDevice(path); ok {
+		return s.openCharDevice(m, channel, dev, unit, unitSet, rest, mode)
+	}
 	spec, err := s.parseSpec(path, "DAT")
 	if err != nil {
 		return basicErr(err.Error())
 	}
+	return s.openDiskFile(m, channel, spec, mode)
+}
+
+func (s *Shell) openDiskFile(m *Machine, channel int, spec FileSpec, mode string) error {
 	folder, err := s.Disk.ResolveFolder(spec, s.Account.Proj, s.Account.Prog)
 	if err != nil {
 		return err

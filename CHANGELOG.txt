@@ -26,6 +26,20 @@ BASIC-PLUS
       30   IF N > 1 THEN FNF = N * FNF(N-1)
       40 FNEND
 
+  Character devices open like files, so a program can be handed a
+  channel and not care what is on the end of it:
+
+      OPEN "KB:" AS FILE n    this terminal; KBn: another one, which
+                              needs the privilege FORCE needs
+      OPEN "LP:" AS FILE n    the printer. No printer is attached to
+                              this 11/70, so it spools to LPn.LST in
+                              the account, or to a name given after
+                              the colon
+      OPEN "NL:" AS FILE n    the null device: output is swallowed and
+                              a read is at end of file at once
+
+  TT: is accepted for KB:.
+
   The variables a program reads after an operation:
 
       RECOUNT   characters the last INPUT or GET transferred

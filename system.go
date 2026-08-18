@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"time"
 )
@@ -214,6 +215,19 @@ func (sys *System) Halted() bool {
 	default:
 		return false
 	}
+}
+
+// shellOnKB finds the session sitting on a keyboard, so that a program
+// can open another terminal as a channel.
+func (sys *System) shellOnKB(kb string) *Shell {
+	sys.mu.Lock()
+	defer sys.mu.Unlock()
+	for _, sh := range sys.shells {
+		if sh != nil && strings.EqualFold(sh.KB, kb) {
+			return sh
+		}
+	}
+	return nil
 }
 
 func (sys *System) setConsole(s *Shell) {

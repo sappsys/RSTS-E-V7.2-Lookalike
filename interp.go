@@ -60,7 +60,17 @@ type chanFile struct {
 	orgVirtual bool
 	mapName    string
 	class      int
+	dev        charDev
 	onClose    func()
+}
+
+// charDev is a channel that is not a disk file: a terminal, the printer,
+// the null device. RSTS put these behind the same OPEN as a file, so a
+// program can PRINT #n to whichever it was given.
+type charDev interface {
+	devWrite(text string) error
+	devReadLine() (string, error)
+	devClose()
 }
 
 type fieldSlot struct {
@@ -1891,6 +1901,9 @@ func (m *Machine) fileWrite(ch int, text string) error {
 	if f.pk != nil {
 		return f.pk.ctrlWrite(text)
 	}
+	if f.dev != nil {
+		return f.dev.devWrite(text)
+	}
 	if f.mode != "OUTPUT" && f.mode != "APPEND" {
 		return m.err("I/O error")
 	}
@@ -1905,6 +1918,13 @@ func (m *Machine) fileReadLine(ch int) (string, error) {
 	}
 	if f.pk != nil {
 		line, err := f.pk.ctrlReadLine()
+		if err == io.EOF {
+			return "", m.err("End of file on device")
+		}
+		return line, err
+	}
+	if f.dev != nil {
+		line, err := f.dev.devReadLine()
 		if err == io.EOF {
 			return "", m.err("End of file on device")
 		}
