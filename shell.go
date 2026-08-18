@@ -9,6 +9,7 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -32,6 +33,7 @@ Topics:
   LANG      BASIC-PLUS statements
   FN        built-in functions
   COMMANDS  keyboard commands
+  SET       WIDTH / ECHO
   SYSTAT    jobs, disks, memory  (SYS, WHO)
   SHOW      SHOW DISKS / JOBS / CPU / ...
   DISKS     MOUNT, DISMOUNT, packs
@@ -53,6 +55,9 @@ PASSWORD [p,pn]     (priv) set another account's password
 Logged-out prompt is  Bye
 Logged-in prompt is   Ready
 
+After HELLO the system types [1,2]NOTICE.TXT, then runs LOGIN.BAS or
+START.BAS in the account if one exists.
+
 At Bye:
   HELLO             log in
   EXIT / QUIT       stop the emulator (console)
@@ -69,6 +74,9 @@ PIP dst=src                 copy (PIP syntax)
 KILL filespec               delete a file
 UNSAVE filespec             delete a file
 NAME old AS new             rename
+ASSIGN device: logical      job logical name (ASSIGN DB1: WORK)
+DEASSIGN [logical]          drop one name, or all if omitted
+SET WIDTH n / ECHO / NOECHO terminal (TTYSET)
 NAME old AS new<prot>       rename and/or set protection
 SYSTAT / SYS / WHO          jobs (RSTS columns)
 ATTACH / DETACH             reconnect a detached job
@@ -97,6 +105,7 @@ COMPILE name<prot>  compile with an explicit protection code
 LIST [n[-m]]        list program lines
 RUN [name]          run (loads .BAC then .BAS if a name is given)
 RUNNH / LISTNH      same, without the header
+CONT                continue after STOP (not if the program was edited)
 DELETE n[-m]        delete program lines
 CLEAR               reset variables
 
@@ -111,9 +120,10 @@ A line that starts with a number is stored in the program:
   IF ... THEN ... ELSE
   FOR ... TO ... STEP / NEXT
   WHILE ... / NEXT   UNTIL ... / NEXT
-  DIM  DATA  READ  RESTORE  CHANGE  MAT
+  DIM  DIM #n, A(m)[=len]  DATA  READ  RESTORE  CHANGE  MAT
   MAT READ/PRINT/INPUT  MAT C = A+B / A-B / A*B / (K)*A
   MAT C = ZER / CON / IDN / TRN(A) / INV(A)
+  MAT C = ZER(n,m) / CON(n,m) / IDN(n)   (optional redimension)
   OPEN ... [FOR INPUT/OUTPUT/APPEND] AS FILE #n [, RECORDSIZE n]
   OPEN ... AS FILE #n, ORGANIZATION VIRTUAL
   OPEN "PK:" AS FILE n      spawn a job on a pseudo keyboard
@@ -122,6 +132,8 @@ A line that starts with a number is stored in the program:
   FIELD #n, n AS A$   LSET / RSET
   CLOSE #n  RANDOMIZE  DEF FNx = ...
   ON ERROR GOTO n / 0   RESUME [NEXT | n]
+  CHAIN filespec [LINE n]   SLEEP seconds
+  NAME old AS new   KILL filespec
   END  STOP  REM  (or ! comment)
 
 Statement modifiers (rightmost is outermost):
@@ -150,7 +162,9 @@ SWAP%(n)         swap bytes of a 16-bit word (T%(11%)+SWAP%(T%(12%)))
 RIGHT$(s,n)      from character n to the end (BASIC-PLUS, not last-n)
 
 SYS(CHR$(n)+...): 1=system, 2=PPN, 3=job, 4=program, 5=date,
-  6=FIP  0/-21=binary PPN  -3=UU.TB1  -12=UU.TB2  9=ident
+  6=FIP  0/-21=binary PPN  1=name  2=job  3=KB  5=date  7=minutes
+     8=priv  9=ident  10=SY  14=SY0:  -2=echo  -8=KB unit
+     -3=UU.TB1  -12=UU.TB2  -10=UU.TRM (width/echo)
   7=time, 9=pack SY
 ERR and ERL are the last trapped error number and line.
 CVT%$ / CVT$% pack 16-bit integers.
@@ -257,7 +271,25 @@ Ordinary users mount private packs. SY0:/DB0: cannot be dismounted.
 Pack IDs are 1-6 letters or digits. Once mounted, PAYROL: is a
 logical name for that unit.
 
+Job logical names (in addition to pack IDs):
+
+  ASSIGN DB1: WORK     DIR WORK:    SAVE WORK:FOO
+  DEASSIGN WORK        DEASSIGN     (all)
+
 A sample pack PAYROL is initialized on DB1: and left unmounted.
+`,
+	"SET": `Terminal settings (TTYSET). Stored on this job; Telnet echo and
+width follow SET ECHO / SET WIDTH.
+
+  SET WIDTH n
+  SET ECHO
+  SET NOECHO
+  SET TERMINAL WIDTH n
+  TTYSET WIDTH n
+  SET                 show current width and echo
+
+Width is 0..255. SYS(CHR$(6%)+CHR$(-10%)) returns the width in the
+first word of a 30-byte buffer (UU.TRM).
 `,
 	"SYSTAT": `SYSTAT is the V7.2 status CUSP (also typed as SYS). Switches may be
 attached:  SYSTAT/D  is the same as  SYSTAT /D.
@@ -299,8 +331,9 @@ and attached switches work: SYSTAT/D, DISMOU DB1:, HLP DISK.
   HELLO  BYE  PASSWORD
   EXIT  QUIT              at Bye, stop the emulator
   DIR  CAT  TYPE  COPY  PIP  KILL  UNSAVE  NAME
-  NEW  OLD  SAVE  REPLACE  COMPILE  LIST  LISTNH  RUN  RUNNH
-  DELETE  CLEAR
+  ASSIGN  DEASSIGN
+  NEW  OLD  SAVE  REPLACE  COMPILE  LIST  LISTNH  RUN  RUNNH  CONT
+  DELETE  CLEAR  SET  TTYSET
   SYSTAT  SYS  WHO
   MOUNT  DISMOUNT  DSKINT  UMOUNT
   ATTACH  DETACH  FORCE  HANGUP  BROADCAST  SEND
@@ -310,7 +343,7 @@ and attached switches work: SYSTAT/D, DISMOU DB1:, HLP DISK.
   CPU  HARDWARE
 
 Type HELP topic. Topics: LOGIN FILES BASIC LANG FN COMMANDS SYSTAT
-SHOW DISKS ACCOUNTS COMPILE HARDWARE TELNET JOBS
+SHOW DISKS ACCOUNTS COMPILE HARDWARE TELNET JOBS SET
 `,
 	"HELP": `Help can be obtained on a topic by typing:
 
@@ -322,7 +355,7 @@ prefix. Attached switches are ignored (HELP SYSTAT/D = HELP SYSTAT).
 
 Additional help is available on:
   LOGIN FILES BASIC LANG FN COMMANDS SYSTAT SHOW DISKS
-  ACCOUNTS COMPILE HARDWARE TELNET JOBS HELP
+  ACCOUNTS COMPILE HARDWARE TELNET JOBS SET HELP
 `,
 	"PLEASE": `PLEASE sent a message to the operator on V7.2. This system has no
 operator console queue. Use SEND or BROADCAST.
@@ -487,6 +520,9 @@ type Shell struct {
 	forceCh    chan string
 	in         *bufio.Reader
 	out        io.Writer
+	echo       bool
+	width      int
+	logicals   map[string]string
 	console    bool
 }
 
@@ -526,12 +562,32 @@ func (sys *System) newSession(job *Job, out io.Writer, term terminal) *Shell {
 		Running:  true,
 		out:      out,
 		forceCh:  make(chan string, 8),
+		echo:     true,
+		width:    80,
+		logicals: map[string]string{},
 	}
 	s.Basic = NewMachine(IO{
 		Write: s.write,
 		Read:  s.read,
 		Open:  s.openBasicFile,
-		Job:   job.Num,
+		Load: func(name string) error {
+			if err := s.loadForRun(name); err != nil {
+				return err
+			}
+			if s.Basic.PrivImage {
+				s.tempPriv = true
+			} else {
+				s.tempPriv = false
+			}
+			s.syncPrivilege()
+			return nil
+		},
+		Delete: s.basicKill,
+		Rename: s.basicName,
+		Job:    job.Num,
+		KB:     job.KB,
+		Width:  80,
+		Echo:   true,
 		PollInterrupt: func() bool {
 			t, ok := s.term.(interface{ PollInterrupt() bool })
 			return ok && t.PollInterrupt()
@@ -677,7 +733,7 @@ func (s *Shell) openBasicFile(m *Machine, channel int, path, mode string) error 
 	if s.Account == nil {
 		return basicErr("I/O error")
 	}
-	spec, err := ParseFileSpec(path, "DAT")
+	spec, err := s.parseSpec(path, "DAT")
 	if err != nil {
 		return basicErr(err.Error())
 	}
@@ -944,6 +1000,14 @@ func (s *Shell) dispatchCmd(verb, rest string) error {
 		return s.cmdAccount()
 	case "SHOW":
 		s.cmdShow(rest)
+	case "CONT", "CONTINUE":
+		s.cmdCont()
+	case "SET", "TTYSET":
+		return s.cmdSet(rest)
+	case "ASSIGN":
+		return s.cmdAssign(rest)
+	case "DEASSIGN":
+		return s.cmdDeassign(rest)
 	default:
 		return errNotCmd
 	}
@@ -986,6 +1050,7 @@ var keyboardCmds = []string{
 	"DETACH", "ATTACH", "FORCE", "HANGUP", "BROADCAST", "SEND", "TALK",
 	"CPU", "HARDWARE", "DATE", "TIME", "DAYTIME",
 	"PASSWORD", "CREATE", "REACT", "ACCOUNT", "SHOW", "REMOVE",
+	"CONT", "SET", "TTYSET", "ASSIGN", "DEASSIGN",
 }
 
 func matchCmd(verb string) string {
@@ -1052,6 +1117,246 @@ func (s *Shell) storeProgramLine(line string) {
 	}
 }
 
+func (s *Shell) parseSpec(text, defaultExt string) (FileSpec, error) {
+	return ParseFileSpec(s.expandLogical(text), defaultExt)
+}
+
+func (s *Shell) expandLogical(text string) string {
+	if s == nil || len(s.logicals) == 0 {
+		return text
+	}
+	raw := strings.TrimSpace(text)
+	body, prot, protSet, err := splitProt(raw)
+	if err != nil {
+		return text
+	}
+	i := strings.IndexByte(body, ':')
+	if i <= 0 {
+		return text
+	}
+	dev := strings.ToUpper(body[:i])
+	alias, ok := s.logicals[dev]
+	if !ok {
+		return text
+	}
+	out := alias + body[i:]
+	if protSet {
+		return fmt.Sprintf("%s<%d>", out, prot)
+	}
+	return out
+}
+
+func specDevToken(spec FileSpec) string {
+	if spec.UnitSet {
+		return fmt.Sprintf("%s%d", spec.Device, spec.Unit)
+	}
+	return spec.Device
+}
+
+func (s *Shell) printNotice() {
+	if s.Disk == nil {
+		return
+	}
+	spec, err := ParseFileSpec("[1,2]NOTICE.TXT", "")
+	if err != nil {
+		return
+	}
+	text, err := s.Disk.ReadText(spec, 1, 2, true)
+	if err != nil || strings.TrimSpace(text) == "" {
+		return
+	}
+	fmt.Fprint(s.out, text)
+	if !strings.HasSuffix(text, "\n") {
+		fmt.Fprint(s.out, "\n")
+	}
+}
+
+func (s *Shell) runLoginFile() {
+	if s.Account == nil || s.Disk == nil {
+		return
+	}
+	for _, name := range []string{"LOGIN", "START"} {
+		spec, err := s.parseSpec(name, "BAS")
+		if err != nil {
+			continue
+		}
+		if s.Disk.Exists(spec, s.Account.Proj, s.Account.Prog, s.priv()) {
+			s.cmdRun(name, false)
+			return
+		}
+		bac := spec
+		bac.Ext = "BAC"
+		if s.Disk.Exists(bac, s.Account.Proj, s.Account.Prog, s.priv()) {
+			s.cmdRun(name, false)
+			return
+		}
+	}
+}
+
+func (s *Shell) basicKill(path string) error {
+	acct, err := s.needLogin()
+	if err != nil {
+		return err
+	}
+	spec, err := s.parseSpec(path, "BAS")
+	if err != nil {
+		return err
+	}
+	return s.Disk.Delete(spec, acct.Proj, acct.Prog, s.priv())
+}
+
+func (s *Shell) basicName(old, new string) error {
+	acct, err := s.needLogin()
+	if err != nil {
+		return err
+	}
+	ospec, err := s.parseSpec(old, "BAS")
+	if err != nil {
+		return err
+	}
+	nspec, err := s.parseSpec(new, "BAS")
+	if err != nil {
+		return err
+	}
+	if err := s.Disk.Rename(ospec, nspec, acct.Proj, acct.Prog, s.accountPriv()); err != nil {
+		return err
+	}
+	if ospec.Filename() == s.Basic.ProgramName+".BAS" {
+		s.Basic.ProgramName = nspec.Name
+	}
+	return nil
+}
+
+func (s *Shell) cmdAssign(rest string) error {
+	if _, err := s.needLogin(); err != nil {
+		return err
+	}
+	rest = strings.TrimSpace(rest)
+	if rest == "" {
+		if len(s.logicals) == 0 {
+			fmt.Fprintln(s.out, "No logical names")
+			return nil
+		}
+		keys := make([]string, 0, len(s.logicals))
+		for k := range s.logicals {
+			keys = append(keys, k)
+		}
+		sort.Strings(keys)
+		for _, k := range keys {
+			fmt.Fprintf(s.out, "%s:  =  %s:\n", k, s.logicals[k])
+		}
+		return nil
+	}
+	dev, logical := "", ""
+	parts := strings.Fields(rest)
+	if len(parts) >= 2 {
+		dev, logical = parts[0], parts[1]
+	} else {
+		tok := strings.ToUpper(parts[0])
+		i := strings.IndexByte(tok, ':')
+		if i < 0 || i == len(tok)-1 {
+			fmt.Fprintln(s.out, "?ASSIGN device: logical")
+			return nil
+		}
+		dev, logical = tok[:i+1], tok[i+1:]
+	}
+	dev = strings.ToUpper(strings.TrimSpace(dev))
+	if !strings.HasSuffix(dev, ":") {
+		dev += ":"
+	}
+	logical = strings.ToUpper(strings.TrimSuffix(strings.TrimSpace(logical), ":"))
+	if !validPackID(logical) {
+		return fsErr("Illegal file name")
+	}
+	spec, err := ParseFileSpec(dev, "")
+	if err != nil {
+		return err
+	}
+	if s.logicals == nil {
+		s.logicals = map[string]string{}
+	}
+	s.logicals[logical] = specDevToken(spec)
+	return nil
+}
+
+func (s *Shell) cmdDeassign(rest string) error {
+	if _, err := s.needLogin(); err != nil {
+		return err
+	}
+	rest = strings.TrimSpace(rest)
+	if rest == "" {
+		s.logicals = map[string]string{}
+		return nil
+	}
+	name := strings.ToUpper(strings.TrimSuffix(rest, ":"))
+	delete(s.logicals, name)
+	return nil
+}
+
+func (s *Shell) cmdSet(rest string) error {
+	if _, err := s.needLogin(); err != nil {
+		return err
+	}
+	fields := strings.Fields(strings.ToUpper(rest))
+	if len(fields) == 0 {
+		fmt.Fprintf(s.out, "WIDTH %d\n", s.width)
+		if s.echo {
+			fmt.Fprintln(s.out, "ECHO")
+		} else {
+			fmt.Fprintln(s.out, "NOECHO")
+		}
+		return nil
+	}
+	i := 0
+	if fields[0] == "TERMINAL" || fields[0] == "TT" {
+		i = 1
+		if i >= len(fields) {
+			fmt.Fprintln(s.out, "?SET WIDTH n  or  SET ECHO / NOECHO")
+			return nil
+		}
+	}
+	switch fields[i] {
+	case "WIDTH":
+		if i+1 >= len(fields) {
+			fmt.Fprintln(s.out, "?SET WIDTH n")
+			return nil
+		}
+		n, err := strconv.Atoi(fields[i+1])
+		if err != nil || n < 0 || n > 255 {
+			return fsErr("Illegal number")
+		}
+		s.width = n
+		if s.Basic != nil {
+			s.Basic.IO.Width = n
+		}
+		s.applyTermSettings()
+	case "ECHO":
+		s.echo = true
+		if s.Basic != nil {
+			s.Basic.IO.Echo = true
+		}
+		s.applyTermSettings()
+	case "NOECHO":
+		s.echo = false
+		if s.Basic != nil {
+			s.Basic.IO.Echo = false
+		}
+		s.applyTermSettings()
+	default:
+		fmt.Fprintln(s.out, "?SET WIDTH n  or  SET ECHO / NOECHO")
+	}
+	return nil
+}
+
+func (s *Shell) applyTermSettings() {
+	if t, ok := s.term.(interface{ SetEcho(bool) }); ok {
+		t.SetEcho(s.echo)
+	}
+	if t, ok := s.term.(interface{ SetWidth(int) }); ok && s.width > 0 {
+		t.SetWidth(s.width)
+	}
+}
+
 func (s *Shell) cmdHello(rest string) {
 	if s.Account != nil {
 		fmt.Fprintln(s.out, "?Already logged in -- type BYE first")
@@ -1105,6 +1410,8 @@ func (s *Shell) Login(token, password string) {
 	fmt.Fprintf(s.out, "%s  Job %d  %s  %s  %s\n", SystemName, s.Job, kb, NowDate(), NowTime())
 	fmt.Fprintf(s.out, "User:  %s\n", acct.PPN())
 	fmt.Fprintln(s.out)
+	s.printNotice()
+	s.runLoginFile()
 }
 
 func (s *Shell) syncJob() {
@@ -1179,6 +1486,14 @@ func (s *Shell) cmdBye(rest string) {
 		s.Basic.IO.AccountName = ""
 	}
 	s.Account = nil
+	s.logicals = map[string]string{}
+	s.echo = true
+	s.width = 80
+	if s.Basic != nil {
+		s.Basic.IO.Echo = true
+		s.Basic.IO.Width = 80
+	}
+	s.applyTermSettings()
 	s.syncJob()
 	if strings.EqualFold(rest, "/EXIT") || strings.EqualFold(rest, "EXIT") {
 		s.cmdHalt()
@@ -1232,6 +1547,8 @@ var helpAlias = map[string]string{
 	"PACK": "DISKS", "PACKS": "DISKS", "MOUNT": "DISKS", "DISMOUNT": "DISKS",
 	"DSKINT": "DISKS", "UMOUNT": "DISKS", "INITIALIZE": "DISKS", "INIT": "DISKS",
 	"ASSIGN": "DISKS", "DEASSIGN": "DISKS", "REASSIGN": "DISKS",
+	"CONT": "BASIC", "CONTINUE": "BASIC",
+	"SET": "SET", "TTYSET": "SET", "ECHO": "SET", "WIDTH": "SET",
 	"SYS": "SYSTAT", "WHO": "SYSTAT", "STATUS": "SYSTAT",
 	"CCL": "COMMANDS", "KEYBOARD": "JOBS", "KEYBOARDS": "JOBS",
 	"CMDS": "COMMANDS", "DCL": "COMMANDS",
@@ -1302,7 +1619,7 @@ func (s *Shell) cmdDir(rest string) error {
 	if arg == "" {
 		arg = "*.*"
 	}
-	spec, err := ParseFileSpec(arg, "*")
+	spec, err := s.parseSpec(arg, "*")
 	if err != nil {
 		return err
 	}
@@ -1329,7 +1646,7 @@ func (s *Shell) cmdType(rest string) error {
 		}
 		rest = strings.TrimSpace(rest)
 	}
-	spec, err := ParseFileSpec(rest, "")
+	spec, err := s.parseSpec(rest, "")
 	if err != nil {
 		return err
 	}
@@ -1354,11 +1671,11 @@ func (s *Shell) cmdCopy(rest string) error {
 		fmt.Fprintln(s.out, "?COPY src dst")
 		return nil
 	}
-	src, err := ParseFileSpec(parts[0], "")
+	src, err := s.parseSpec(parts[0], "")
 	if err != nil {
 		return err
 	}
-	dst, err := ParseFileSpec(parts[1], src.Ext)
+	dst, err := s.parseSpec(parts[1], src.Ext)
 	if err != nil {
 		return err
 	}
@@ -1375,11 +1692,11 @@ func (s *Shell) cmdPip(rest string) error {
 		fmt.Fprintln(s.out, "?PIP dst=src")
 		return nil
 	}
-	dst, err := ParseFileSpec(strings.TrimSpace(rest[:i]), "")
+	dst, err := s.parseSpec(strings.TrimSpace(rest[:i]), "")
 	if err != nil {
 		return err
 	}
-	src, err := ParseFileSpec(strings.TrimSpace(rest[i+1:]), "")
+	src, err := s.parseSpec(strings.TrimSpace(rest[i+1:]), "")
 	if err != nil {
 		return err
 	}
@@ -1398,7 +1715,7 @@ func (s *Shell) cmdKill(rest string) error {
 	if name == "" {
 		name = s.Basic.ProgramName
 	}
-	spec, err := ParseFileSpec(name, "BAS")
+	spec, err := s.parseSpec(name, "BAS")
 	if err != nil {
 		return err
 	}
@@ -1416,11 +1733,11 @@ func (s *Shell) cmdName(rest string) error {
 		fmt.Fprintln(s.out, "?NAME old AS new")
 		return nil
 	}
-	old, err := ParseFileSpec(rest[:idx], "BAS")
+	old, err := s.parseSpec(rest[:idx], "BAS")
 	if err != nil {
 		return err
 	}
-	new, err := ParseFileSpec(rest[idx+4:], "BAS")
+	new, err := s.parseSpec(rest[idx+4:], "BAS")
 	if err != nil {
 		return err
 	}
@@ -1476,7 +1793,7 @@ func (s *Shell) cmdOld(rest string) error {
 		}
 		name = strings.TrimSpace(name)
 	}
-	spec, err := ParseFileSpec(name, "BAS")
+	spec, err := s.parseSpec(name, "BAS")
 	if err != nil {
 		return err
 	}
@@ -1528,7 +1845,7 @@ func (s *Shell) cmdSave(rest string, replace bool) error {
 			name = "NONAME"
 		}
 	}
-	spec, err := ParseFileSpec(name, "BAS")
+	spec, err := s.parseSpec(name, "BAS")
 	if err != nil {
 		return err
 	}
@@ -1573,7 +1890,7 @@ func (s *Shell) cmdCompile(rest string) error {
 		}
 		name = base + name
 	}
-	spec, err := ParseFileSpec(name, "BAC")
+	spec, err := s.parseSpec(name, "BAC")
 	if err != nil {
 		return err
 	}
@@ -1606,14 +1923,32 @@ func (s *Shell) cmdRun(rest string, heading bool) {
 	if heading {
 		fmt.Fprintf(s.out, "%s   %s    %s\n\n", s.Basic.ProgramName, NowTime(), NowDate())
 	}
-	privImage := s.Basic.PrivImage
-	if privImage {
+	if s.Basic.PrivImage {
 		s.tempPriv = true
 		s.syncPrivilege()
 	}
 	s.inProgram = true
 	s.syncJob()
 	err := s.Basic.RunProgram()
+	s.finishRun(err)
+}
+
+func (s *Shell) cmdCont() {
+	if s.Basic == nil || !s.Basic.Stopped || s.Basic.paused == nil {
+		fmt.Fprintln(s.out, "?Can't continue")
+		return
+	}
+	if s.Basic.PrivImage {
+		s.tempPriv = true
+		s.syncPrivilege()
+	}
+	s.inProgram = true
+	s.syncJob()
+	err := s.Basic.Continue()
+	s.finishRun(err)
+}
+
+func (s *Shell) finishRun(err error) {
 	s.inProgram = false
 	if err != nil {
 		if errors.Is(err, ErrInterrupt) {
@@ -1625,13 +1960,12 @@ func (s *Shell) cmdRun(rest string, heading bool) {
 	stopped := s.Basic.Stopped
 	line := s.Basic.CurrentLine
 	s.dropTempPriv()
-	if privImage {
+	if stopped {
+		fmt.Fprintf(s.out, "Stop at line %d\n", line)
+	} else if s.Basic.PrivImage {
 		s.Basic.ClearProgram("NONAME")
 	}
 	s.syncJob()
-	if stopped {
-		fmt.Fprintf(s.out, "Stop at line %d\n", line)
-	}
 }
 
 func (s *Shell) loadForRun(name string) error {
@@ -1639,7 +1973,7 @@ func (s *Shell) loadForRun(name string) error {
 	if err != nil {
 		return err
 	}
-	spec, err := ParseFileSpec(name, "")
+	spec, err := s.parseSpec(name, "")
 	if err != nil {
 		return err
 	}
@@ -1718,6 +2052,7 @@ func (s *Shell) cmdDelete(rest string) error {
 				delete(s.Basic.Program, num)
 			}
 		}
+		s.Basic.NoteEdit()
 		return nil
 	}
 	return s.cmdKill(token)

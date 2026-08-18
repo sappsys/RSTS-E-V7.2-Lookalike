@@ -116,12 +116,13 @@ Type `HELP` or `HELP topic`. Abbreviations and CUSP names work (`HELP DISK` = `H
 
 | Topic | Contents |
 |-------|----------|
-| `LOGIN` | HELLO, BYE, EXIT, Ctrl-C |
-| `FILES` | DIR, TYPE, COPY, PIP, KILL, NAME, filespecs |
-| `BASIC` | NEW, OLD, SAVE, COMPILE, LIST, RUN |
+| `LOGIN` | HELLO, BYE, EXIT, Ctrl-C, NOTICE / LOGIN.BAS |
+| `FILES` | DIR, TYPE, COPY, PIP, KILL, NAME, ASSIGN, filespecs |
+| `BASIC` | NEW, OLD, SAVE, COMPILE, LIST, RUN, CONT |
 | `LANG` | BASIC-PLUS statements and modifiers |
 | `FN` | Built-in functions and SYS |
 | `COMMANDS` | Keyboard command list |
+| `SET` | WIDTH / ECHO (TTYSET) |
 | `SYSTAT` | Job/disk/memory switches |
 | `SHOW` | SHOW aliases for SYSTAT |
 | `DISKS` | MOUNT, DISMOUNT, DSKINT, packs |
@@ -144,6 +145,8 @@ Type `HELP` or `HELP topic`. Abbreviations and CUSP names work (`HELP DISK` = `H
 | `PIP dst=src` | Copy (PIP syntax); `PIP dest<prot>=src` sets protection |
 | `KILL` / `UNSAVE` filespec | Delete |
 | `NAME old AS new` | Rename and/or set `<prot>` |
+| `ASSIGN device: logical` | Job logical name (`ASSIGN DB1: WORK`) |
+| `DEASSIGN [logical]` | Drop one name, or all |
 
 ### BASIC environment
 
@@ -155,8 +158,10 @@ Type `HELP` or `HELP topic`. Abbreviations and CUSP names work (`HELP DISK` = `H
 | `COMPILE [name][<prot>]` | Compile to `.BAC` (default `<124>`) |
 | `LIST` / `LISTNH` `[n[-m]]` | List source |
 | `RUN` / `RUNNH` `[name]` | Run (tries `.BAC` then `.BAS`) |
+| `CONT` | Continue after `STOP` (fails if the program was edited) |
 | `DELETE n[-m]` | Delete program lines |
 | `CLEAR` | Reset variables |
+| `SET WIDTH n` / `SET ECHO` / `SET NOECHO` | Terminal (also `TTYSET`) |
 
 Numbered lines are stored in the program in memory:
 
@@ -270,7 +275,7 @@ Non-owners cannot `OLD`, `TYPE`, or `LIST` a compiled file. They may `RUN` a pub
 
 This is **BASIC-PLUS** (the V7 interpreter language), not BASIC-PLUS-2. `HELP LANG` and `HELP FN` are the dialect that actually runs.
 
-Statements: `LET`, `PRINT`, `INPUT`, `LINE INPUT`, `PRINT USING`, `GOTO`, `GOSUB`, `RETURN`, `ON … GOTO/GOSUB`, `IF … THEN … ELSE`, `FOR/NEXT`, `WHILE/NEXT`, `UNTIL/NEXT`, `DIM`, `DATA`, `READ`, `RESTORE`, `CHANGE`, `MAT`, `MAP`, `OPEN` / `PRINT#` / `INPUT#`, `GET` / `PUT`, `FIELD`, `LSET` / `RSET`, `CLOSE`, `RANDOMIZE`, `DEF FNx = …`, `ON ERROR GOTO`, `RESUME`, `END`, `STOP`, `REM` (or `!`).
+Statements: `LET`, `PRINT`, `INPUT`, `LINE INPUT`, `PRINT USING`, `GOTO`, `GOSUB`, `RETURN`, `ON … GOTO/GOSUB`, `IF … THEN … ELSE`, `FOR/NEXT`, `WHILE/NEXT`, `UNTIL/NEXT`, `DIM`, `DIM #n` (virtual arrays), `DATA`, `READ`, `RESTORE`, `CHANGE`, `MAT` (including `ZER(n,m)` redim), `MAP`, `OPEN` / `PRINT#` / `INPUT#`, `GET` / `PUT`, `FIELD`, `LSET` / `RSET`, `CLOSE`, `RANDOMIZE`, `DEF FNx = …`, `ON ERROR GOTO`, `RESUME`, `CHAIN`, `SLEEP`, `NAME`, `KILL`, `END`, `STOP`, `REM` (or `!`).
 
 Modifiers (rightmost is outermost): `IF`, `UNLESS`, `WHILE`, `UNTIL`, `FOR`. Several statements on one line are separated by `\`. Integer divide is also `\` inside an expression. Relational true is **-1**, false is **0**. Types: `$` string, `%` integer.
 
@@ -278,7 +283,17 @@ Functions: `ABS INT FIX SGN SQR SIN COS TAN ATN LOG EXP RND PI ERR ERL PEEK SWAP
 
 `RIGHT$(s,n)` is from character *n* to the end (BASIC-PLUS, not last-*n*).
 
-`SYS(CHR$(n)+…)`: 1=system name, 2=PPN, 3=job, 4=program, 5=date, 6=FIP (0/-21 binary PPN, -3=UU.TB1, -12=UU.TB2, 9=ident), 7=time, 9=pack SY.
+`SYS(CHR$(n)+…)`: 1=system name, 2=PPN, 3=job, 4=program, 5=date, 6=FIP (0/-21 binary PPN, 1=name, 2=job, 3=KB, 5=date, 9=ident, -3=UU.TB1, -12=UU.TB2, -10=UU.TRM), 7=time, 9=pack SY.
+
+`CHAIN filespec [LINE n]` loads and runs another program. `SLEEP n` waits n seconds (Ctrl-C aborts). `CONT` at Ready resumes after `STOP` unless the program was edited.
+
+Virtual arrays: `OPEN "FILE.DAT" AS FILE 1` then `DIM #1, A%(100)` or `DIM #1, A$(50)=20`. `%` elements are 2 bytes, floating 4, strings default 16. `MAT A = ZER(n,m)` redimensions.
+
+`NAME "OLD" AS "NEW"` and `KILL "FILE"` are BASIC statements as well as keyboard commands.
+
+`ASSIGN DB1: WORK` creates a job logical name; `DEASSIGN` removes it. Pack IDs still work when the pack is mounted.
+
+After `HELLO`, `[1,2]NOTICE.TXT` is typed, then `LOGIN.BAS` or `START.BAS` in the account is `RUN` if present.
 
 `OPEN "PK:" AS FILE n` assigns a pseudo keyboard and forks a job. `PRINT #n` sends keystrokes; `INPUT #n` / `LINE INPUT #n` reads output; `CLOSE #n` hangs up the child. Demo: `OLD PK` then `RUN` on GUEST.
 

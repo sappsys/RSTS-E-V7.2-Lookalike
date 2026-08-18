@@ -69,6 +69,10 @@ const (
 	stRset
 	stMat
 	stMap
+	stChain
+	stSleep
+	stKill
+	stName
 )
 
 type printItem struct {
@@ -103,8 +107,10 @@ type mapField struct {
 }
 
 type dimItem struct {
-	name   string
-	bounds []expr
+	name    string
+	bounds  []expr
+	channel expr
+	strLen  expr
 }
 
 type value struct {
@@ -158,6 +164,7 @@ type stmt struct {
 	matLeft   string
 	matRight  string
 	matNames  []string
+	matBounds []expr
 	org       string
 	mapName   string
 	mapFields []mapField
@@ -348,6 +355,14 @@ func (p *parser) parseBareStatement() (stmt, error) {
 			return p.parseMat()
 		case "MAP":
 			return p.parseMap()
+		case "CHAIN":
+			return p.parseChain()
+		case "SLEEP":
+			return p.parseSleep()
+		case "KILL":
+			return p.parseKill()
+		case "NAME":
+			return p.parseName()
 		default:
 			return stmt{}, basicErr("Syntax error")
 		}
@@ -687,17 +702,35 @@ func (p *parser) parseDim() (stmt, error) {
 	if err := p.expectKw("DIM"); err != nil {
 		return stmt{}, err
 	}
-	item, err := p.parseDimItem()
-	if err != nil {
-		return stmt{}, err
-	}
-	s := stmt{kind: stDim, arrays: []dimItem{item}}
-	for p.acceptKind(tokComma) {
+	s := stmt{kind: stDim}
+	var ch expr
+	for {
+		if p.acceptKind(tokHash) {
+			c, err := p.parseExpr()
+			if err != nil {
+				return stmt{}, err
+			}
+			ch = c
+			if err := p.expectKind(tokComma); err != nil {
+				return stmt{}, err
+			}
+		}
 		item, err := p.parseDimItem()
 		if err != nil {
 			return stmt{}, err
 		}
+		item.channel = ch
+		if item.channel != nil && strings.HasSuffix(item.name, "$") && p.acceptOp("=") {
+			ln, err := p.parseExpr()
+			if err != nil {
+				return stmt{}, err
+			}
+			item.strLen = ln
+		}
 		s.arrays = append(s.arrays, item)
+		if !p.acceptKind(tokComma) {
+			break
+		}
 	}
 	return s, nil
 }
@@ -1487,6 +1520,25 @@ func (p *parser) parseMat() (stmt, error) {
 	switch name {
 	case "ZER", "CON", "IDN":
 		s.matKind = name
+		if p.acceptKind(tokLParen) {
+			if !p.acceptKind(tokRParen) {
+				b, err := p.parseExpr()
+				if err != nil {
+					return stmt{}, err
+				}
+				s.matBounds = []expr{b}
+				for p.acceptKind(tokComma) {
+					b, err := p.parseExpr()
+					if err != nil {
+						return stmt{}, err
+					}
+					s.matBounds = append(s.matBounds, b)
+				}
+				if err := p.expectKind(tokRParen); err != nil {
+					return stmt{}, err
+				}
+			}
+		}
 		return s, nil
 	case "TRN", "INV":
 		if err := p.expectKind(tokLParen); err != nil {
@@ -1590,6 +1642,65 @@ func (p *parser) parseMatPrint() (stmt, error) {
 		break
 	}
 	return s, nil
+}
+
+func (p *parser) parseChain() (stmt, error) {
+	if err := p.expectKw("CHAIN"); err != nil {
+		return stmt{}, err
+	}
+	path, err := p.parseExpr()
+	if err != nil {
+		return stmt{}, err
+	}
+	s := stmt{kind: stChain, path: path}
+	if p.acceptKw("LINE") {
+		line, err := p.parseExpr()
+		if err != nil {
+			return stmt{}, err
+		}
+		s.expr = line
+	}
+	return s, nil
+}
+
+func (p *parser) parseSleep() (stmt, error) {
+	if err := p.expectKw("SLEEP"); err != nil {
+		return stmt{}, err
+	}
+	n, err := p.parseExpr()
+	if err != nil {
+		return stmt{}, err
+	}
+	return stmt{kind: stSleep, expr: n}, nil
+}
+
+func (p *parser) parseKill() (stmt, error) {
+	if err := p.expectKw("KILL"); err != nil {
+		return stmt{}, err
+	}
+	path, err := p.parseExpr()
+	if err != nil {
+		return stmt{}, err
+	}
+	return stmt{kind: stKill, path: path}, nil
+}
+
+func (p *parser) parseName() (stmt, error) {
+	if err := p.expectKw("NAME"); err != nil {
+		return stmt{}, err
+	}
+	old, err := p.parseExpr()
+	if err != nil {
+		return stmt{}, err
+	}
+	if err := p.expectKw("AS"); err != nil {
+		return stmt{}, err
+	}
+	newp, err := p.parseExpr()
+	if err != nil {
+		return stmt{}, err
+	}
+	return stmt{kind: stName, fromExpr: old, expr: newp}, nil
 }
 
 func (p *parser) parseMap() (stmt, error) {

@@ -6,6 +6,7 @@ import (
 	"math"
 	"strconv"
 	"strings"
+	"time"
 )
 
 func errorCode(err error) int {
@@ -79,6 +80,55 @@ func defaultSys(arg string, io IO) (string, error) {
 			sub = int(int8(arg[1]))
 		}
 		switch sub {
+		case 2:
+			if io.Job != 0 {
+				return binU16(io.Job), nil
+			}
+			return binU16(1), nil
+		case 3:
+			if io.KB != "" {
+				return io.KB, nil
+			}
+			return "KB0:", nil
+		case 4:
+			return io.ProgramName, nil
+		case 5:
+			return binU16(rstsDateInt(time.Now())), nil
+		case 7:
+			return binU16(minutesToMidnight(time.Now())), nil
+		case 8:
+			if io.Privileged {
+				return string([]byte{255, 255}), nil
+			}
+			return string([]byte{0, 0}), nil
+		case 10:
+			return "SY", nil
+		case 14:
+			return "SY0:", nil
+		case -8:
+			kb := io.KB
+			u := 0
+			if strings.HasPrefix(strings.ToUpper(kb), "KB") {
+				n := strings.TrimSuffix(strings.TrimPrefix(strings.ToUpper(kb), "KB"), ":")
+				u, _ = strconv.Atoi(n)
+			}
+			return binU16(u), nil
+		case -2:
+			if io.Echo {
+				return string([]byte{255}), nil
+			}
+			return string([]byte{0}), nil
+		case -10:
+			buf := make([]byte, 30)
+			w := io.Width
+			if w <= 0 {
+				w = 80
+			}
+			binary.LittleEndian.PutUint16(buf[0:2], uint16(w))
+			if io.Echo {
+				buf[2] = 255
+			}
+			return string(buf), nil
 		case 0, -21:
 			proj, prog := parsePPN(io.PPN)
 			buf := make([]byte, 4)
@@ -125,6 +175,12 @@ func parsePPN(ppn string) (int, int) {
 	a, _ := strconv.Atoi(strings.TrimSpace(parts[0]))
 	b, _ := strconv.Atoi(strings.TrimSpace(parts[1]))
 	return a, b
+}
+
+func binU16(n int) string {
+	buf := make([]byte, 2)
+	binary.LittleEndian.PutUint16(buf, uint16(n))
+	return string(buf)
 }
 
 func cvtPercentDollar(n float64) string {

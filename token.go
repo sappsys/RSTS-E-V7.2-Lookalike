@@ -44,7 +44,8 @@ var keywords = map[string]bool{
 	"AS": true, "FILE": true, "OUTPUT": true, "APPEND": true, "RANDOMIZE": true,
 	"ON": true, "DEF": true, "AND": true, "OR": true, "NOT": true, "MOD": true,
 	"GO": true, "TAB": true, "SPC": true, "LINE": true, "REPLACE": true,
-	"CLEAR": true, "CHAIN": true, "NAME": true, "ERROR": true, "RESUME": true,
+	"CLEAR": true, "CHAIN": true, "NAME": true, "KILL": true, "SLEEP": true,
+	"ERROR": true, "RESUME": true,
 	"CHANGE": true, "USING": true, "GET": true, "PUT": true, "FIELD": true,
 	"LSET": true, "RSET": true, "RECORD": true, "RECORDSIZE": true, "UNLESS": true,
 	"MAT": true, "MAP": true, "ORGANIZATION": true, "VIRTUAL": true,
@@ -58,6 +59,7 @@ var statementStarters = map[string]bool{
 	"ON": true, "DEF": true, "CHANGE": true, "LINE": true, "UNTIL": true,
 	"GET": true, "PUT": true, "FIELD": true, "LSET": true, "RSET": true,
 	"RESUME": true, "MAT": true, "MAP": true,
+	"CHAIN": true, "SLEEP": true, "KILL": true, "NAME": true,
 }
 
 var builtins = map[string]bool{

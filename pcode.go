@@ -89,6 +89,11 @@ const (
 	opInputFile
 	opMat
 	opMap
+	opChain
+	opSleep
+	opKill
+	opName
+	opDimVirt
 )
 
 const (
@@ -119,6 +124,9 @@ const (
 	matScale
 	matTrn
 	matInv
+	matZerRedim
+	matConRedim
+	matIdnRedim
 )
 
 type pcodeLine struct {

@@ -44,6 +44,15 @@ func (m *Machine) runImage(img *pcodeImage, immediate bool) error {
 		fns:       map[string]pcodeFn{},
 		immediate: immediate,
 	}
+	if !immediate && m.startLine > 0 {
+		ip, ok := img.lineIP(m.startLine)
+		if !ok {
+			m.startLine = 0
+			return basicErr("Undefined line number")
+		}
+		vm.pc = ip
+		m.startLine = 0
+	}
 	m.data = append([]value(nil), img.Data...)
 	m.dataPtr = 0
 	m.running = true
@@ -51,10 +60,18 @@ func (m *Machine) runImage(img *pcodeImage, immediate bool) error {
 	m.HasLine = !immediate
 	defer func() {
 		m.running = false
-		if !immediate {
-			m.CloseAllFiles()
+		if immediate {
+			m.HasLine = false
+			return
 		}
+		if m.Stopped {
+			m.paused = vm
+			m.pauseSeq = m.editSeq
+			return
+		}
+		m.CloseAllFiles()
 		m.HasLine = false
+		m.paused = nil
 	}()
 	return vm.run()
 }
@@ -582,6 +599,55 @@ func (vm *pvm) step(op byte) error {
 		return vm.execMat()
 	case opMap:
 		return vm.execMap()
+	case opChain:
+		return vm.execChain()
+	case opSleep:
+		return vm.execSleep()
+	case opKill:
+		path, err := vm.pop()
+		if err != nil {
+			return err
+		}
+		return m.doKillPath(m.strVal(path))
+	case opName:
+		newv, err := vm.pop()
+		if err != nil {
+			return err
+		}
+		oldv, err := vm.pop()
+		if err != nil {
+			return err
+		}
+		return m.doNamePath(m.strVal(oldv), m.strVal(newv))
+	case opDimVirt:
+		name := vm.str()
+		n := int(vm.u8())
+		flags := vm.u8()
+		strLen := 0
+		if flags&2 != 0 {
+			v, err := vm.popNum()
+			if err != nil {
+				return err
+			}
+			strLen = int(v)
+		}
+		bounds := make([]int, n)
+		for i := n - 1; i >= 0; i-- {
+			v, err := vm.popNum()
+			if err != nil {
+				return err
+			}
+			bounds[i] = int(v)
+		}
+		ch := 0
+		if flags&1 != 0 {
+			v, err := vm.popNum()
+			if err != nil {
+				return err
+			}
+			ch = int(v)
+		}
+		return m.dimVirtArray(name, bounds, ch, strLen)
 	default:
 		return m.err("Compiled file")
 	}
@@ -624,6 +690,26 @@ func (vm *pvm) execMat() error {
 		case matZer:
 			st.matKind = "ZER"
 		case matCon:
+			st.matKind = "CON"
+		default:
+			st.matKind = "IDN"
+		}
+	case matZerRedim, matConRedim, matIdnRedim:
+		st.matDest = vm.str()
+		n := int(vm.u8())
+		bounds := make([]expr, n)
+		for i := n - 1; i >= 0; i-- {
+			v, err := vm.popNum()
+			if err != nil {
+				return err
+			}
+			bounds[i] = numLit{v: v}
+		}
+		st.matBounds = bounds
+		switch kind {
+		case matZerRedim:
+			st.matKind = "ZER"
+		case matConRedim:
 			st.matKind = "CON"
 		default:
 			st.matKind = "IDN"
@@ -917,6 +1003,48 @@ func (vm *pvm) str() string {
 		return ""
 	}
 	return vm.img.Strings[i]
+}
+
+func (vm *pvm) execChain() error {
+	flags := vm.u8()
+	line := 0
+	if flags&1 != 0 {
+		n, err := vm.popNum()
+		if err != nil {
+			return err
+		}
+		line = int(n)
+	}
+	path, err := vm.pop()
+	if err != nil {
+		return err
+	}
+	vm.m.chainTo = vm.m.strVal(path)
+	vm.m.chainLine = line
+	vm.m.running = false
+	return nil
+}
+
+func (vm *pvm) execSleep() error {
+	n, err := vm.popNum()
+	if err != nil {
+		return err
+	}
+	if n < 0 {
+		n = 0
+	}
+	deadline := time.Now().Add(time.Duration(n * float64(time.Second)))
+	for time.Now().Before(deadline) {
+		if vm.m.Interrupted() {
+			return ErrInterrupt
+		}
+		left := time.Until(deadline)
+		if left > 50*time.Millisecond {
+			left = 50 * time.Millisecond
+		}
+		time.Sleep(left)
+	}
+	return nil
 }
 
 func idxLits(idxs []int) []expr {

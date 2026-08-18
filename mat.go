@@ -23,6 +23,22 @@ func (m *Machine) doMat(s stmt) error {
 		}
 		return nil
 	case "ZER", "CON", "IDN":
+		if len(s.matBounds) > 0 {
+			bounds := make([]int, len(s.matBounds))
+			for i, b := range s.matBounds {
+				n, err := m.evalNum(b)
+				if err != nil {
+					return err
+				}
+				bounds[i] = int(n)
+			}
+			if s.matKind == "IDN" && len(bounds) == 1 {
+				bounds = []int{bounds[0], bounds[0]}
+			}
+			if err := m.dimArray(s.matDest, bounds); err != nil {
+				return err
+			}
+		}
 		return m.matFill(s.matDest, s.matKind)
 	case "COPY":
 		return m.matCopy(s.matDest, s.matLeft)

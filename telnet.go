@@ -152,7 +152,25 @@ func (t *telnetConn) Write(p []byte) (int, error) {
 }
 
 func (t *telnetConn) ReadLine(prompt string) (string, error) {
-	return t.readEdit(prompt, true)
+	return t.readEdit(prompt, t.echo)
+}
+
+func (t *telnetConn) SetEcho(on bool) {
+	t.wmu.Lock()
+	t.echo = on
+	t.wmu.Unlock()
+}
+
+func (t *telnetConn) SetWidth(n int) {
+	if n < 16 {
+		n = 16
+	}
+	if n > 255 {
+		n = 255
+	}
+	t.wmu.Lock()
+	t.cols = n
+	t.wmu.Unlock()
 }
 
 func (t *telnetConn) ReadPassword(prompt string) (string, error) {

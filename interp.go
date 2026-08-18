@@ -73,8 +73,14 @@ type fnDef struct {
 }
 
 type arrayInfo struct {
-	dims []int
-	data []value
+	dims     []int
+	data     []value
+	virtChan int
+	virtBase int
+	elemSize int
+	strLen   int
+	isStr    bool
+	isInt    bool
 }
 
 type IO struct {
@@ -82,11 +88,17 @@ type IO struct {
 	Read          func(prompt string) (string, error)
 	Open          func(m *Machine, channel int, path, mode string) error
 	Sys           func(arg string) (string, error)
+	Load          func(name string) error
+	Delete        func(path string) error
+	Rename        func(old, new string) error
 	PPN           string
 	Job           int
 	AccountName   string
 	Privileged    bool
 	ProgramName   string
+	KB            string
+	Width         int
+	Echo          bool
 	PollInterrupt func() bool
 }
 
@@ -121,9 +133,22 @@ type Machine struct {
 	intr        atomic.Bool
 	maps        map[string]*mapArea
 	currentMap  string
+	paused      *pvm
+	editSeq     int
+	pauseSeq    int
+	startLine   int
+	chainTo     string
+	chainLine   int
+	virtNext    map[int]int
 }
 
 func NewMachine(io IO) *Machine {
+	if io.Width <= 0 {
+		io.Width = 80
+	}
+	if !io.Echo {
+		io.Echo = true
+	}
 	m := &Machine{
 		IO:          io,
 		ProgramName: "NONAME",
@@ -155,6 +180,8 @@ func (m *Machine) resetRuntime() {
 	m.inHandler = false
 	m.maps = map[string]*mapArea{}
 	m.currentMap = ""
+	m.paused = nil
+	m.virtNext = map[int]int{}
 }
 
 func (m *Machine) Interrupt() {
@@ -199,6 +226,7 @@ func (m *Machine) ClearProgram(name string) {
 	m.Compiled = false
 	m.PrivImage = false
 	m.Image = nil
+	m.editSeq++
 	m.resetRuntime()
 }
 
@@ -208,6 +236,7 @@ func (m *Machine) StoreLine(number int, text string) error {
 	}
 	if strings.TrimSpace(text) == "" {
 		delete(m.Program, number)
+		m.editSeq++
 		return nil
 	}
 	if _, err := parseSourceLine(text); err != nil {
@@ -217,6 +246,7 @@ func (m *Machine) StoreLine(number int, text string) error {
 		m.Program = map[int]string{}
 	}
 	m.Program[number] = text
+	m.editSeq++
 	return nil
 }
 
@@ -317,22 +347,87 @@ func (m *Machine) collectData() {
 	}
 }
 
+func (m *Machine) NoteEdit() {
+	m.editSeq++
+}
+
 func (m *Machine) RunProgram() error {
-	if m.Compiled && m.Image != nil {
+	for {
+		if m.Compiled && m.Image != nil {
+			m.clearInterrupt()
+			m.resetRuntime()
+			err := m.runImage(m.Image, false)
+			if m.chainTo != "" {
+				if err := m.takeChain(); err != nil {
+					return err
+				}
+				continue
+			}
+			return err
+		}
+		if len(m.Program) == 0 {
+			return basicErr("No program")
+		}
+		img, err := compileProgram(m.Program)
+		if err != nil {
+			return err
+		}
 		m.clearInterrupt()
 		m.resetRuntime()
-		return m.runImage(m.Image, false)
-	}
-	if len(m.Program) == 0 {
-		return basicErr("No program")
-	}
-	img, err := compileProgram(m.Program)
-	if err != nil {
+		err = m.runImage(img, false)
+		if m.chainTo != "" {
+			if err := m.takeChain(); err != nil {
+				return err
+			}
+			continue
+		}
 		return err
 	}
+}
+
+func (m *Machine) takeChain() error {
+	name := strings.TrimSpace(m.chainTo)
+	line := m.chainLine
+	m.chainTo = ""
+	m.chainLine = 0
+	if name == "" {
+		return basicErr("Illegal file name")
+	}
+	if m.IO.Load == nil {
+		return basicErr("Can't find file or account")
+	}
+	if err := m.IO.Load(name); err != nil {
+		return err
+	}
+	m.startLine = line
+	return nil
+}
+
+func (m *Machine) Continue() error {
+	if m.paused == nil || !m.Stopped {
+		return basicErr("Can't continue")
+	}
+	if m.editSeq != m.pauseSeq {
+		return basicErr("Can't continue")
+	}
+	vm := m.paused
+	m.paused = nil
+	m.Stopped = false
+	m.running = true
+	m.HasLine = true
 	m.clearInterrupt()
-	m.resetRuntime()
-	return m.runImage(img, false)
+	defer func() {
+		m.running = false
+		if m.Stopped {
+			m.paused = vm
+			m.pauseSeq = m.editSeq
+			return
+		}
+		m.CloseAllFiles()
+		m.HasLine = false
+		m.paused = nil
+	}()
+	return vm.run()
 }
 
 func (m *Machine) findIndex(order []int, line int) (int, error) {
@@ -426,7 +521,16 @@ func (m *Machine) ExecImmediate(text string) error {
 	if err != nil {
 		return err
 	}
-	return m.runImage(img, true)
+	if err := m.runImage(img, true); err != nil {
+		return err
+	}
+	if m.chainTo != "" {
+		if err := m.takeChain(); err != nil {
+			return err
+		}
+		return m.RunProgram()
+	}
+	return nil
 }
 
 func (m *Machine) execStmts(stmts []stmt) (jump, error) {
@@ -1481,6 +1585,70 @@ func (m *Machine) dimArray(name string, bounds []int) error {
 	return nil
 }
 
+func (m *Machine) dimVirtArray(name string, bounds []int, channel, strLen int) error {
+	if channel < 1 {
+		return m.err("I/O error")
+	}
+	f := m.Files[channel]
+	if f == nil || f.file == nil {
+		return m.err("I/O error")
+	}
+	for _, b := range bounds {
+		if b < 0 {
+			return m.err("Subscript out of range")
+		}
+	}
+	elem := 4
+	isStr, isInt := false, false
+	switch {
+	case strings.HasSuffix(name, "%"):
+		elem = 2
+		isInt = true
+	case strings.HasSuffix(name, "$"):
+		isStr = true
+		if strLen <= 0 {
+			strLen = 16
+		}
+		if strLen < 1 {
+			return m.err("Illegal number")
+		}
+		elem = strLen
+	}
+	if m.arrays == nil {
+		m.arrays = map[string]*arrayInfo{}
+	}
+	nelt := 1
+	for _, b := range bounds {
+		nelt *= b + 1
+	}
+	nbytes := nelt * elem
+	base := 0
+	if old, ok := m.arrays[name]; ok && old.virtChan == channel {
+		base = old.virtBase
+	} else {
+		if m.virtNext == nil {
+			m.virtNext = map[int]int{}
+		}
+		base = m.virtNext[channel]
+	}
+	if m.virtNext == nil {
+		m.virtNext = map[int]int{}
+	}
+	if end := base + nbytes; m.virtNext[channel] < end {
+		m.virtNext[channel] = end
+	}
+	m.arrays[name] = &arrayInfo{
+		dims:     append([]int(nil), bounds...),
+		virtChan: channel,
+		virtBase: base,
+		elemSize: elem,
+		strLen:   strLen,
+		isStr:    isStr,
+		isInt:    isInt,
+	}
+	return nil
+}
+
 func (m *Machine) offset(name string, idxs []int) (int, error) {
 	if err := m.ensureArray(name, idxs); err != nil {
 		return 0, err
@@ -1506,7 +1674,11 @@ func (m *Machine) getArray(name string, idxs []int) (value, error) {
 	if err != nil {
 		return value{}, err
 	}
-	return m.arrays[name].data[off], nil
+	info := m.arrays[name]
+	if info.virtChan != 0 {
+		return m.virtGet(info, off)
+	}
+	return info.data[off], nil
 }
 
 func (m *Machine) setArray(name string, idxs []int, v value) error {
@@ -1514,7 +1686,98 @@ func (m *Machine) setArray(name string, idxs []int, v value) error {
 	if err != nil {
 		return err
 	}
-	m.arrays[name].data[off] = v
+	info := m.arrays[name]
+	if info.virtChan != 0 {
+		return m.virtSet(info, off, v)
+	}
+	info.data[off] = v
+	return nil
+}
+
+func (m *Machine) virtGet(info *arrayInfo, off int) (value, error) {
+	f := m.Files[info.virtChan]
+	if f == nil || f.file == nil {
+		return value{}, m.err("I/O error")
+	}
+	buf := make([]byte, info.elemSize)
+	n, err := f.file.ReadAt(buf, int64(info.virtBase+off*info.elemSize))
+	if n < info.elemSize {
+		for i := n; i < info.elemSize; i++ {
+			buf[i] = 0
+		}
+	}
+	if err != nil && err != io.EOF && n == 0 {
+		return value{}, m.err("I/O error")
+	}
+	switch {
+	case info.isStr:
+		return strValue(string(buf)), nil
+	case info.isInt:
+		return numValue(cvtDollarPercent(string(buf))), nil
+	default:
+		return numValue(cvtDollarF(string(buf))), nil
+	}
+}
+
+func (m *Machine) virtSet(info *arrayInfo, off int, v value) error {
+	f := m.Files[info.virtChan]
+	if f == nil || f.file == nil {
+		return m.err("I/O error")
+	}
+	var buf []byte
+	switch {
+	case info.isStr:
+		s := m.strVal(v)
+		if len(s) > info.elemSize {
+			s = s[:info.elemSize]
+		}
+		b := []byte(s)
+		if len(b) < info.elemSize {
+			pad := make([]byte, info.elemSize)
+			copy(pad, b)
+			for i := len(b); i < info.elemSize; i++ {
+				pad[i] = ' '
+			}
+			b = pad
+		}
+		buf = b
+	case info.isInt:
+		n, err := m.numVal(v)
+		if err != nil {
+			return err
+		}
+		buf = []byte(cvtPercentDollar(n))
+	default:
+		n, err := m.numVal(v)
+		if err != nil {
+			return err
+		}
+		buf = []byte(cvtFDollar(n))
+	}
+	_, err := f.file.WriteAt(buf, int64(info.virtBase+off*info.elemSize))
+	if err != nil {
+		return m.err("I/O error")
+	}
+	return nil
+}
+
+func (m *Machine) doKillPath(path string) error {
+	if m.IO.Delete == nil {
+		return m.err("I/O error")
+	}
+	if err := m.IO.Delete(path); err != nil {
+		return m.err(strings.TrimPrefix(err.Error(), "?"))
+	}
+	return nil
+}
+
+func (m *Machine) doNamePath(old, new string) error {
+	if m.IO.Rename == nil {
+		return m.err("I/O error")
+	}
+	if err := m.IO.Rename(old, new); err != nil {
+		return m.err(strings.TrimPrefix(err.Error(), "?"))
+	}
 	return nil
 }
 

@@ -342,14 +342,35 @@ func (c *compiler) core(s stmt) error {
 		return nil
 	case stDim:
 		for _, a := range s.arrays {
+			if a.channel != nil {
+				if err := c.expr(a.channel); err != nil {
+					return err
+				}
+			}
 			for _, b := range a.bounds {
 				if err := c.expr(b); err != nil {
 					return err
 				}
 			}
-			c.emit(opDim)
-			c.emitU16(c.intern(a.name))
-			c.emitU8(byte(len(a.bounds)))
+			if a.strLen != nil {
+				if err := c.expr(a.strLen); err != nil {
+					return err
+				}
+			}
+			if a.channel != nil {
+				c.emit(opDimVirt)
+				c.emitU16(c.intern(a.name))
+				c.emitU8(byte(len(a.bounds)))
+				flags := byte(1)
+				if a.strLen != nil {
+					flags |= 2
+				}
+				c.emitU8(flags)
+			} else {
+				c.emit(opDim)
+				c.emitU16(c.intern(a.name))
+				c.emitU8(byte(len(a.bounds)))
+			}
 		}
 		return nil
 	case stRead:
@@ -537,6 +558,41 @@ func (c *compiler) core(s stmt) error {
 		return c.mat(s)
 	case stMap:
 		return c.mapStmt(s)
+	case stChain:
+		if err := c.expr(s.path); err != nil {
+			return err
+		}
+		flags := byte(0)
+		if s.expr != nil {
+			if err := c.expr(s.expr); err != nil {
+				return err
+			}
+			flags = 1
+		}
+		c.emit(opChain)
+		c.emitU8(flags)
+		return nil
+	case stSleep:
+		if err := c.expr(s.expr); err != nil {
+			return err
+		}
+		c.emit(opSleep)
+		return nil
+	case stKill:
+		if err := c.expr(s.path); err != nil {
+			return err
+		}
+		c.emit(opKill)
+		return nil
+	case stName:
+		if err := c.expr(s.fromExpr); err != nil {
+			return err
+		}
+		if err := c.expr(s.expr); err != nil {
+			return err
+		}
+		c.emit(opName)
+		return nil
 	default:
 		return basicErr("Syntax error")
 	}
@@ -731,6 +787,11 @@ func (c *compiler) mat(s stmt) error {
 			return err
 		}
 	}
+	for _, b := range s.matBounds {
+		if err := c.expr(b); err != nil {
+			return err
+		}
+	}
 	c.emit(opMat)
 	switch s.matKind {
 	case "READ":
@@ -750,14 +811,32 @@ func (c *compiler) mat(s stmt) error {
 		c.emitU8(matInput)
 		c.emitMatNames(s.matNames)
 	case "ZER":
-		c.emitU8(matZer)
-		c.emitU16(c.intern(s.matDest))
+		if len(s.matBounds) > 0 {
+			c.emitU8(matZerRedim)
+			c.emitU16(c.intern(s.matDest))
+			c.emitU8(byte(len(s.matBounds)))
+		} else {
+			c.emitU8(matZer)
+			c.emitU16(c.intern(s.matDest))
+		}
 	case "CON":
-		c.emitU8(matCon)
-		c.emitU16(c.intern(s.matDest))
+		if len(s.matBounds) > 0 {
+			c.emitU8(matConRedim)
+			c.emitU16(c.intern(s.matDest))
+			c.emitU8(byte(len(s.matBounds)))
+		} else {
+			c.emitU8(matCon)
+			c.emitU16(c.intern(s.matDest))
+		}
 	case "IDN":
-		c.emitU8(matIdn)
-		c.emitU16(c.intern(s.matDest))
+		if len(s.matBounds) > 0 {
+			c.emitU8(matIdnRedim)
+			c.emitU16(c.intern(s.matDest))
+			c.emitU8(byte(len(s.matBounds)))
+		} else {
+			c.emitU8(matIdn)
+			c.emitU16(c.intern(s.matDest))
+		}
 	case "COPY":
 		c.emitU8(matCopy)
 		c.emitU16(c.intern(s.matDest))
