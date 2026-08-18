@@ -14,6 +14,30 @@ login banner both report it.
 V7.2-11   in progress
 ---------------------
 
+Serial lines
+
+  config.toml takes a comma separated list of serial devices:
+
+      serial = "/dev/ttyUSB0,/dev/ttyS0"
+
+  Each is answered at 9600 8N1 and is a job on its own KB: line,
+  behaving exactly as a Telnet connection does, and the line is offered
+  again when the user logs off, the way a getty would. Real terminals
+  and USB-serial adapters can now be hung off the emulator with no
+  network involved.
+
+  The line is opened raw with no flow control and no modem control
+  lines, so a three-wire cable works, and O_NOCTTY keeps a Ctrl-C on the
+  line from reaching the emulator itself. Echo and line editing are done
+  here, as RSTS did them; Ctrl-C interrupts a running program.
+
+  A line that will not open is reported and the rest of the system still
+  starts. Serial needs termios, so Linux, macOS and the BSDs have it,
+  and on other platforms a configured line reports that it cannot be
+  provided. All 42 buildable targets still build.
+
+  --no-telnet with serial lines configured no longer refuses to start.
+
   The release number is now one constant. Version in shell.go gives
   SystemRelease and SystemName, and the banner, SYS(CHR$(1)), --version,
   --help, HELP HARDWARE, the seeded NOTICE.TXT and the generated

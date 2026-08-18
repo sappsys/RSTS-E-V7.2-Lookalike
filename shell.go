@@ -48,6 +48,7 @@ Topics:
   COMPILE   .BAC files and the privilege bit
   HARDWARE  PDP-11/70 configuration
   TELNET    multi-user Telnet / VT52
+  SERIAL    terminals on serial lines
   JOBS      SYSTAT, ATTACH, PK:
   HELP      how to use HELP
 
@@ -222,8 +223,8 @@ SYS(CHR$(6%)+CHR$(-3%)) returns the monitor table: after CHANGE TO T%,
 
 Type SHOW CPU  or  OLD CPU  then RUN.
 `,
-	"TELNET": `This system is multi-user. Each Telnet connection is a RSTS job
-on its own KB: line (KB0: is the local console).
+	"TELNET": `This system is multi-user. Each Telnet connection and each
+serial line is a RSTS job on its own KB: line (KB0: is the console).
 
   config.toml
     max_users    = 25     simultaneous jobs (1..63)
@@ -231,6 +232,7 @@ on its own KB: line (KB0: is the local console).
     telnet_bind  = "0.0.0.0"
     telnet       = true
     console      = true
+    serial       = ""     "/dev/ttyUSB0,/dev/ttyS0"
 
 Connect with any Telnet client. Terminal type VT52 is the baseline
 (ESC A/B/C/D/H/J/K/Y/Z). ANSI/VT100 cursor keys are accepted too.
@@ -241,6 +243,34 @@ At the Bye prompt:  HELLO  then account and password.
 BYE logs out. EXIT or QUIT at Bye stops the emulator on the console
 (a Telnet EXIT hangs up that line only).
 Ctrl-C interrupts a running program; Ctrl-U kills the input line.
+
+Serial lines are listed in serial, separated by commas. Each is
+answered at 9600 8N1 and behaves exactly like a Telnet line, and the
+line is offered again when the user logs off. Real terminals and
+USB-serial adapters can be hung off the emulator this way with no
+network at all. Type HELP SERIAL.
+`,
+	"SERIAL": `Serial lines. Each device named in serial is answered at
+9600 8N1 and is a RSTS job on its own KB: line, exactly like a Telnet
+connection. When the user logs off the line is offered again.
+
+  config.toml
+    serial = "/dev/ttyUSB0,/dev/ttyS0"
+
+The line is raw, with no flow control and no modem control lines, so a
+three-wire cable works. Echo and line editing are done here, the way
+RSTS did them. Ctrl-C interrupts a running program.
+
+A line that will not open is reported at startup and the rest of the
+system still comes up. Serial needs termios: Linux, macOS and the BSDs
+have it, and elsewhere a configured line reports that the platform
+cannot provide one.
+
+To try it without hardware, make a virtual pair:
+
+  socat -d PTY,raw,echo=0,link=/tmp/tty1 PTY,raw,echo=0,link=/tmp/tty2
+
+then set serial = "/tmp/tty1" and talk to /tmp/tty2.
 `,
 	"JOBS": `Job monitor commands (RSTS/E V7.2):
 
@@ -1696,6 +1726,7 @@ var helpAlias = map[string]string{
 	"RENUM": "BASIC", "RENUMBER": "BASIC", "RESEQ": "BASIC",
 	"SET": "SET", "TTYSET": "SET", "ECHO": "SET", "WIDTH": "SET",
 	"SYS": "SYSTAT", "WHO": "SYSTAT", "STATUS": "SYSTAT",
+	"TTY": "SERIAL", "RS232": "SERIAL", "MODEM": "SERIAL", "PORT": "SERIAL",
 	"CCL": "COMMANDS", "KEYBOARD": "JOBS", "KEYBOARDS": "JOBS",
 	"CMDS": "COMMANDS", "DCL": "COMMANDS",
 	"CPU": "HARDWARE", "PDP": "HARDWARE", "PDP11": "HARDWARE", "SWITCH": "HARDWARE",
@@ -2851,8 +2882,8 @@ config.toml keys: max_users (25), telnet_port (23), telnet_bind,
 	if noTelnet {
 		cfg.Telnet = false
 	}
-	if !cfg.Console && !cfg.Telnet {
-		fmt.Fprintln(os.Stderr, "Nothing to run: console and telnet are both off")
+	if !cfg.Console && !cfg.Telnet && len(cfg.Serial) == 0 {
+		fmt.Fprintln(os.Stderr, "Nothing to run: console, telnet and serial are all off")
 		return 1
 	}
 	sys, err := NewSystem(disk, cfg)
@@ -2877,6 +2908,17 @@ config.toml keys: max_users (25), telnet_port (23), telnet_bind,
 			fmt.Fprintf(os.Stderr, "Telnet %s  %d users  VT52  (%s)\n", addr, cfg.MaxUsers, cfgPath)
 		}
 	}
+	serialOK := false
+	if len(cfg.Serial) > 0 {
+		up, errs := sys.StartSerial()
+		for _, e := range errs {
+			fmt.Fprintf(os.Stderr, "Serial %v\n", e)
+		}
+		if len(up) > 0 {
+			serialOK = true
+			fmt.Fprintf(os.Stderr, "Serial %s  %s\n", strings.Join(up, " "), serialSpeed)
+		}
+	}
 	if cfg.Console {
 		job, err := sys.Attach("CONSOLE")
 		if err != nil {
@@ -2898,13 +2940,19 @@ config.toml keys: max_users (25), telnet_port (23), telnet_bind,
 		}()
 		sys.runOnTerm(job, os.Stdout, st, "CONSOLE", login, guest)
 		signal.Stop(ch)
-		if sys.Halted() || !telnetOK {
+		if sys.Halted() || !(telnetOK || serialOK) {
 			sys.Close()
 			return 0
 		}
-		fmt.Fprintln(os.Stderr, "Console detached. Telnet still up. Ctrl-C to stop.")
+		lines := "Telnet"
+		if !telnetOK {
+			lines = "Serial"
+		} else if serialOK {
+			lines = "Telnet and serial"
+		}
+		fmt.Fprintf(os.Stderr, "Console detached. %s still up. Ctrl-C to stop.\n", lines)
 	}
-	if !telnetOK {
+	if !telnetOK && !serialOK {
 		return 0
 	}
 	ch := make(chan os.Signal, 1)

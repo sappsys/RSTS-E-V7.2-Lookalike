@@ -15,11 +15,17 @@ const defaultConfigTOML = "# " + SystemLong + `  (PDP-11/70)
 # Use 2323 (or any port >1023) if you are not root:
 #   telnet_port = 2323
 
+# Serial lines, comma separated. Each one runs at 9600 8N1 and behaves
+# exactly like a Telnet line: one job per line, its own KB:, and the
+# line is offered again when the user logs off.
+#   serial = "/dev/ttyUSB0,/dev/ttyS0"
+
 max_users = 25
 telnet_port = 23
 telnet_bind = "0.0.0.0"
 telnet = true
 console = true
+serial = ""
 `
 
 // Config is loaded from config.toml. MaxUsers is this emulator's
@@ -30,6 +36,8 @@ type Config struct {
 	TelnetBind string
 	Telnet     bool
 	Console    bool
+	// Serial lines to answer, each at 9600 8N1.
+	Serial []string
 }
 
 func DefaultConfig() Config {
@@ -59,6 +67,19 @@ func (c *Config) clamp() {
 	if strings.TrimSpace(c.TelnetBind) == "" {
 		c.TelnetBind = "0.0.0.0"
 	}
+	c.Serial = splitSerial(strings.Join(c.Serial, ","))
+}
+
+// splitSerial reads the comma separated device list, ignoring blanks so
+// that serial = "" means no lines at all.
+func splitSerial(s string) []string {
+	var out []string
+	for _, part := range strings.Split(s, ",") {
+		if dev := strings.TrimSpace(part); dev != "" {
+			out = append(out, dev)
+		}
+	}
+	return out
 }
 
 func LoadConfig(path string) (Config, string, error) {
@@ -130,6 +151,12 @@ func parseTOML(src string, cfg *Config) error {
 				return fmt.Errorf("console: %w", err)
 			}
 			cfg.Console = b
+		case "serial":
+			s, err := tomlString(val)
+			if err != nil {
+				return fmt.Errorf("serial: %w", err)
+			}
+			cfg.Serial = splitSerial(s)
 		}
 	}
 	return nil

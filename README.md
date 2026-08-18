@@ -80,8 +80,8 @@ Options:
 | `--port N` | Telnet port (overrides config) |
 | `--guest` | Log in as GUEST automatically |
 | `--login NAME` | Prompt for that account's password |
-| `--no-console` | Telnet only |
-| `--no-telnet` | Local console only |
+| `--no-console` | Telnet and serial only |
+| `--no-telnet` | Console and serial only |
 | `--version` | Print the release and CPU, e.g. `RSTS V7.2-11  (PDP-11/70)` |
 
 `config.toml`:
@@ -92,6 +92,37 @@ telnet_port = 23          # use 2323 if not root
 telnet_bind = "0.0.0.0"
 telnet      = true
 console     = true
+serial      = ""          # "/dev/ttyUSB0,/dev/ttyS0"
+```
+
+## Serial lines
+
+`serial` takes a comma-separated list of devices. Each one is answered at **9600 8N1** and behaves exactly like a Telnet line: its own job, its own `KB:`, and the line offered again when the user logs off, the way a getty would.
+
+```toml
+serial = "/dev/ttyUSB0,/dev/ttyS0"
+```
+
+```text
+$ rsts
+Serial /dev/ttyUSB0 /dev/ttyS0  9600 8N1
+```
+
+That is enough to hang real terminals, or a USB-serial adapter, off the emulator for multi-user access with no network involved. Both lines above appear in `SYSTAT` as ordinary jobs:
+
+```text
+Job    Who       Where  What      Size  State   Run-Time
+  1  100,100   KB0:   Ready       2K  KB      0:00.00
+  2  1,2       KB1:   Ready       2K  KB      0:00.00
+```
+
+The line is opened raw with no flow control and no modem-control lines (`CLOCAL`), so a three-wire cable works. Echo and line editing are done by the emulator, as they were by RSTS. Ctrl-C interrupts a running program on a serial line just as it does anywhere else. A line that fails to open is reported and the rest of the system still starts.
+
+Serial needs termios, so it works on Linux, macOS and the BSDs. Elsewhere the binary still builds and runs, and a configured serial line reports that the platform cannot provide one. You can test without hardware by making a virtual pair:
+
+```bash
+socat -d PTY,raw,echo=0,link=/tmp/tty1 PTY,raw,echo=0,link=/tmp/tty2
+# serial = "/tmp/tty1", then talk to /tmp/tty2
 ```
 
 Tests:
