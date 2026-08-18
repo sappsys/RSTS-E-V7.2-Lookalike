@@ -261,12 +261,18 @@ The line is raw, with no flow control and no modem control lines, so a
 three-wire cable works. Echo and line editing are done here, the way
 RSTS did them. Ctrl-C interrupts a running program.
 
-A line that will not open is reported at startup and the rest of the
-system still comes up. Serial needs termios: Linux, macOS and the BSDs
-have it, and elsewhere a configured line reports that the platform
-cannot provide one.
+On Windows name the ports the usual way:
 
-To try it without hardware, make a virtual pair:
+    serial = "COM1,COM3"
+
+The \\.\ prefix that COM10 and above need is added for you.
+
+A line that will not open is reported at startup and the rest of the
+system still comes up. Linux, macOS and the BSDs use termios and Windows
+uses a DCB; on any other platform a configured line reports that it
+cannot be provided.
+
+To try it without hardware on Unix, make a virtual pair:
 
   socat -d PTY,raw,echo=0,link=/tmp/tty1 PTY,raw,echo=0,link=/tmp/tty2
 

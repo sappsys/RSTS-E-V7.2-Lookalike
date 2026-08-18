@@ -32,9 +32,20 @@ Serial lines
   here, as RSTS did them; Ctrl-C interrupts a running program.
 
   A line that will not open is reported and the rest of the system still
-  starts. Serial needs termios, so Linux, macOS and the BSDs have it,
-  and on other platforms a configured line reports that it cannot be
-  provided. All 42 buildable targets still build.
+  starts. All 42 buildable targets still build.
+
+  Linux, macOS and the BSDs drive the line through termios. Windows has
+  no termios, so a port there is opened with CreateFile and set up with
+  a DCB, and its read timeouts stand in for the deadline that Go's
+  poller gives us on Unix: a normal read waits for a character, and the
+  Ctrl-C poll switches to returning at once. Ports are named the usual
+  way, serial = "COM1,COM3", and the \\.\ prefix that COM10 and above
+  need is added for the caller. On any other platform a configured line
+  reports that it cannot be provided.
+
+  The Unix path is tested end to end over a real line, including a full
+  login. The Windows path is checked by the compiler and by go vet but
+  has not been run against a physical COM port.
 
   --no-telnet with serial lines configured no longer refuses to start.
 

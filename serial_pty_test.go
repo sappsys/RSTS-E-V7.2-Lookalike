@@ -111,3 +111,116 @@ func waitFor(cond func() bool) bool {
 	}
 	return false
 }
+
+func TestSerialTermLineEditing(t *testing.T) {
+	f, peer, cleanup := serialPair(t)
+	defer cleanup()
+
+	term := newSerialTerm(f)
+	go func() {
+		// "HELLO" with a typo rubbed out, then Return.
+		peer.WriteString("HELXO\b\bLO\r")
+	}()
+	line, err := term.ReadLine("")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if line != "HELLO" {
+		t.Fatalf("read %q, want HELLO", line)
+	}
+
+	go peer.WriteString("SECRET\r")
+	pw, err := term.ReadPassword("Password: ")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if pw != "SECRET" {
+		t.Fatalf("password %q", pw)
+	}
+	if echoed := peer.ReadAvailable(); strings.Contains(echoed, "SECRET") {
+		t.Fatalf("the password was echoed back: %q", echoed)
+	}
+}
+
+func TestSerialTermTranslatesNewlines(t *testing.T) {
+	f, peer, cleanup := serialPair(t)
+	defer cleanup()
+
+	term := newSerialTerm(f)
+	if _, err := term.Write([]byte("one\ntwo\n")); err != nil {
+		t.Fatal(err)
+	}
+	got := peer.ReadAvailable()
+	if got != "one\r\ntwo\r\n" {
+		t.Fatalf("wrote %q, want CR LF endings", got)
+	}
+}
+
+func TestSerialTermInterrupt(t *testing.T) {
+	f, peer, cleanup := serialPair(t)
+	defer cleanup()
+
+	term := newSerialTerm(f)
+	peer.WriteString("\x03")
+	if !waitFor(func() bool { return term.PollInterrupt() }) {
+		t.Fatal("Ctrl-C on the line was not seen")
+	}
+
+	// Other bytes are kept rather than eaten by the poll.
+	peer.WriteString("AB\x03CD\r")
+	if !waitFor(func() bool { return term.PollInterrupt() }) {
+		t.Fatal("Ctrl-C in the middle of a line was not seen")
+	}
+	line, err := term.ReadLine("")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if line != "ABCD" {
+		t.Fatalf("kept %q, want ABCD", line)
+	}
+}
+
+// A whole login over a real line, the same way a terminal on a serial
+// port would drive it.
+func TestSerialLineLogsIn(t *testing.T) {
+	f, peer, cleanup := serialPair(t)
+	defer cleanup()
+
+	sys, err := NewSystem(t.TempDir(), Config{MaxUsers: 4})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer waitJobs(sys, 0)
+	defer sys.Close()
+
+	job, err := sys.Attach("SERIAL test")
+	if err != nil {
+		t.Fatal(err)
+	}
+	term := newSerialTerm(f)
+	go sys.runOnTerm(job, term, term, "SERIAL test", "", false)
+
+	if !peer.WaitFor("Bye") {
+		t.Fatalf("no Bye prompt on the line:\n%s", peer.Seen())
+	}
+	peer.WriteString("HELLO GUEST\r")
+	if !peer.WaitFor("Password") {
+		t.Fatalf("no password prompt:\n%s", peer.Seen())
+	}
+	peer.WriteString("GUEST\r")
+	if !peer.WaitFor("100,100") {
+		t.Fatalf("did not log in:\n%s", peer.Seen())
+	}
+	if !peer.WaitFor("Ready") {
+		t.Fatalf("no Ready prompt:\n%s", peer.Seen())
+	}
+
+	peer.WriteString("PRINT 6*7\r")
+	if !peer.WaitFor("42") {
+		t.Fatalf("BASIC did not answer:\n%s", peer.Seen())
+	}
+	peer.WriteString("BYE\r")
+	if !peer.WaitFor("logged off") {
+		t.Fatalf("did not log off:\n%s", peer.Seen())
+	}
+}

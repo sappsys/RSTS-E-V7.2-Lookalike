@@ -94,14 +94,10 @@ func (t *serialTerm) PollInterrupt() bool {
 			return true
 		}
 	}
-	if err := t.f.SetReadDeadline(time.Now().Add(time.Millisecond)); err != nil {
-		return false
-	}
-	defer t.f.SetReadDeadline(time.Time{})
 	hit := false
 	buf := make([]byte, 64)
 	for {
-		n, err := t.f.Read(buf)
+		n, err := pollRead(t.f, buf)
 		for i := 0; i < n; i++ {
 			if buf[i] == 3 {
 				hit = true

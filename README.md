@@ -116,14 +116,30 @@ Job    Who       Where  What      Size  State   Run-Time
   2  1,2       KB1:   Ready       2K  KB      0:00.00
 ```
 
-The line is opened raw with no flow control and no modem-control lines (`CLOCAL`), so a three-wire cable works. Echo and line editing are done by the emulator, as they were by RSTS. Ctrl-C interrupts a running program on a serial line just as it does anywhere else. A line that fails to open is reported and the rest of the system still starts.
+The line is opened raw with no flow control and no modem-control lines, so a three-wire cable works. Echo and line editing are done by the emulator, as they were by RSTS. Ctrl-C interrupts a running program on a serial line just as it does anywhere else. A line that fails to open is reported and the rest of the system still starts.
 
-Serial needs termios, so it works on Linux, macOS and the BSDs. Elsewhere the binary still builds and runs, and a configured serial line reports that the platform cannot provide one. You can test without hardware by making a virtual pair:
+On Windows, name the ports the usual way:
+
+```toml
+serial = "COM1,COM3"
+```
+
+The `\\.\` prefix needed for `COM10` and above is added for you, so `COM12` works as written.
+
+| Platform | |
+|----------|-|
+| Linux, macOS, the BSDs | termios |
+| Windows | `CreateFile` on the port, then a `DCB` |
+| Plan 9, wasm, others | No serial; a configured line says so at startup and the rest of the system runs |
+
+You can test without hardware on Unix by making a virtual pair:
 
 ```bash
 socat -d PTY,raw,echo=0,link=/tmp/tty1 PTY,raw,echo=0,link=/tmp/tty2
 # serial = "/tmp/tty1", then talk to /tmp/tty2
 ```
+
+The Unix path is tested end to end against a real line, including a full login. The Windows path is written against the documented API and is checked by the compiler and by `go vet`, but it has not been run against a physical COM port — if you try it, do say how it goes.
 
 Tests:
 
