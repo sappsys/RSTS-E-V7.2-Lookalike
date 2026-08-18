@@ -173,7 +173,7 @@ func TestSystatAndPK(t *testing.T) {
 	if !strings.Contains(got, "Job") || !strings.Contains(got, "State") || !strings.Contains(got, "KB0:") {
 		t.Fatalf("systat: %q", got)
 	}
-	if !strings.Contains(got, "RSTS V7.2-10") || strings.Contains(got, "V10") {
+	if !strings.Contains(got, SystemName) || strings.Contains(got, "V10") {
 		t.Fatalf("systat version: %q", got)
 	}
 

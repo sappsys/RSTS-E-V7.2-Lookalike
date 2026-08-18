@@ -18,9 +18,15 @@ import (
 	"golang.org/x/term"
 )
 
+// The system portrayed is RSTS/E V7.2 and does not change. DEC numbered
+// the update level after the dash, and this project uses that number for
+// its own releases, so a build reports the release it came from. Bump
+// Version and everything else follows.
 const (
-	SystemName = "RSTS V7.2-10"
-	Version    = "7.2-10"
+	Version       = "7.2-11"
+	SystemRelease = "V" + Version           // V7.2-11
+	SystemName    = "RSTS " + SystemRelease // RSTS V7.2-11
+	SystemLong    = "RSTS/E " + SystemRelease
 )
 
 var helpText = map[string]string{
@@ -187,7 +193,7 @@ ERR and ERL are the last trapped error number and line.
 CVT%$ / CVT$% pack 16-bit integers.
 CVTF$ / CVT$F pack IEEE float32 (the real 11/70 FPP was FP11-C).
 `,
-	"HARDWARE": `This is RSTS/E V7.2-10 on a PDP-11/70.
+	"HARDWARE": `This is ` + SystemLong + ` on a PDP-11/70.
 
   CPU       PDP-11/70, 22-bit physical addressing
   Memory    1920 K-words usable (4 MW byte space; I/O page at the top)
@@ -2811,7 +2817,7 @@ func Main(args []string) int {
 			fmt.Printf("%s  (%s)\n", SystemName, CPUName)
 			return 0
 		case "-h", "--help":
-			fmt.Print(`RSTS/E V7.2-10  PDP-11/70  BASIC-PLUS
+			fmt.Print(SystemLong + `  PDP-11/70  BASIC-PLUS
 
 Usage: rsts [options]
 

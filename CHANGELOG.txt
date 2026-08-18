@@ -11,10 +11,21 @@ identifies itself with whichever it is built from: SYS(CHR$(1)) and the
 login banner both report it.
 
 
+V7.2-11   in progress
+---------------------
+
+  The release number is now one constant. Version in shell.go gives
+  SystemRelease and SystemName, and the banner, SYS(CHR$(1)), --version,
+  --help, HELP HARDWARE, the seeded NOTICE.TXT and the generated
+  config.toml all follow from it, instead of each spelling out the
+  version of the day.
+
+
 V7.2-10   18-Aug-2026
 ---------------------
 
-First tagged release.
+First tagged release, with static binaries for Linux, macOS and Windows
+on Intel and ARM.
 https://github.com/sappsys/RSTS-E-V7.2-Lookalike/releases/tag/V7.2-10
 
 Build

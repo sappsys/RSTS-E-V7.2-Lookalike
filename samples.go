@@ -3,7 +3,7 @@ package rsts
 // Stock BASIC-PLUS programs seeded onto a new disk.
 var samples = map[string]map[string]string{
 	"1,2": {
-		"NOTICE.TXT": "Welcome to RSTS/E V7.2-10 on PDP-11/70.\nLog in with HELLO, then type HELP or SHOW CPU.\nPrivileged account is 1,2 / SYSTEM.\nRUN $WHOAMI from a guest account to try a privileged CUSP.\n",
+		"NOTICE.TXT": "Welcome to " + SystemLong + " on PDP-11/70.\nLog in with HELLO, then type HELP or SHOW CPU.\nPrivileged account is 1,2 / SYSTEM.\nRUN $WHOAMI from a guest account to try a privileged CUSP.\n",
 		"LOGIN.TXT":  "System account [1,2]. Password is SYSTEM.\n\nRUN COMP   BASIC-PLUS exerciser: every statement and function this\n           system implements, self-checking. Prints ALL PASSED.\nRUN DATA   1000-record virtual file demo.\n",
 		"WHOAMI.BAS": `10 PRINT "ACCOUNT "; SYS(CHR$(2%))
 20 PRINT CVT$%(SYS(CHR$(8%)))

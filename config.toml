@@ -1,4 +1,4 @@
-# RSTS/E V7.2-10  (PDP-11/70)
+# RSTS/E V7.2-11  (PDP-11/70)
 #
 # telnet_port 23 needs root or CAP_NET_BIND_SERVICE on Unix.
 # Use 2323 (or any port >1023) if you are not root:

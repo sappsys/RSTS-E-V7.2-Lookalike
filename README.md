@@ -82,7 +82,7 @@ Options:
 | `--login NAME` | Prompt for that account's password |
 | `--no-console` | Telnet only |
 | `--no-telnet` | Local console only |
-| `--version` | Print `RSTS V7.2-10  (PDP-11/70)` |
+| `--version` | Print the release and CPU, e.g. `RSTS V7.2-11  (PDP-11/70)` |
 
 `config.toml`:
 
@@ -110,7 +110,7 @@ HELLO
 Account or Name: GUEST
 Password:
 
-RSTS V7.2-10  Job 1  KB0  17-Aug-26  7:23 PM
+RSTS V7.2-11  Job 1  KB0  17-Aug-26  7:23 PM
 User:  100,100
 
 Ready
