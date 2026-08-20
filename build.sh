@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Build RSTS/E V7.2-11 for any platform and architecture the Go toolchain
+# Build RSTS/E V7.2-12 for any platform and architecture the Go toolchain
 # supports.
 #
 # CGO is off for every target, so the binary carries its own runtime and

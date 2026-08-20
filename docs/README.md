@@ -29,7 +29,7 @@ This is **BASIC-PLUS-2 V2.7** for RSTS/E V9.7 or higher (also RSX-11M). This sys
 |-------------------|--------------------------------|
 | Labels, compiler directives (`%IF`, `%INCLUDE`) | No |
 | Explicit `DECLARE` / named constants | No; types are `$` / `%` suffixes |
-| Environment `COMPILE` → object / `BUILD` | `COMPILE` writes a `.BAC` bytecode image |
+| Environment `COMPILE` → object / `BUILD` | `COMPILE` writes a `.BAC` or `.PAC` bytecode image |
 | Multi-statement `&` continuation | `\` on one line; no `&` |
 | BP2 compiler switches, RMS libraries | Ignore |
 

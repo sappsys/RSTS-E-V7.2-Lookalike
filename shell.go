@@ -23,9 +23,9 @@ import (
 // its own releases, so a build reports the release it came from. Bump
 // Version and everything else follows.
 const (
-	Version       = "7.2-11"
-	SystemRelease = "V" + Version           // V7.2-11
-	SystemName    = "RSTS " + SystemRelease // RSTS V7.2-11
+	Version       = "7.2-12"
+	SystemRelease = "V" + Version           // V7.2-12
+	SystemName    = "RSTS " + SystemRelease // RSTS V7.2-12
 	SystemLong    = "RSTS/E " + SystemRelease
 )
 
@@ -37,6 +37,7 @@ Topics:
   FILES     DIR, TYPE, COPY, PIP, KILL, NAME
   BASIC     NEW, OLD, SAVE, COMPILE, LIST, RUN
   LANG      BASIC-PLUS statements
+  PASCAL    ISO 7185 / ANSI Pascal
   EDIT      screen editor (VTEDIT style)
   FN        built-in functions
   COMMANDS  keyboard commands
@@ -45,7 +46,7 @@ Topics:
   SHOW      SHOW DISKS / JOBS / CPU / ...
   DISKS     MOUNT, DISMOUNT, packs
   ACCOUNTS  default logins
-  COMPILE   .BAC files and the privilege bit
+  COMPILE   .BAC / .PAC files and the privilege bit
   HARDWARE  PDP-11/70 configuration
   TELNET    multi-user Telnet / VT52
   SERIAL    terminals on serial lines
@@ -76,7 +77,7 @@ At Bye:
   EXIT / QUIT       stop the emulator (console)
   BYE               hang up a Telnet line; on the console, stay at Bye
 
-Ctrl-C stops a running BASIC program and returns to Ready.
+Ctrl-C stops a running BASIC or Pascal program and returns to Ready.
 It does not exit the emulator.
 Ctrl-O discards output until the next Ctrl-O.
 Ctrl-R redisplays the input line.
@@ -128,19 +129,22 @@ DATE / TIME                 clock
 Filespecs:  NAME.EXT  [p,pn]NAME.EXT  SY:[p,pn]NAME.EXT  $NAME
             DB1:NAME.EXT   PAYROL:NAME.EXT   NAME.EXT<prot>
 OLD/SAVE default extension is .BAS
-COMPILE default extension is .BAC
+COMPILE default extension is .BAC (or .PAC from .PAS)
 Protection (V7.2): 60 default, 64 compiled, 128 privileged.
   <124>  compiled, owner-only
   <232>  privileged compiled, world-runnable
 `,
 	"BASIC": `NEW [name]          clear memory, optionally name the program
+NEW name.PAS        start a Pascal program in memory
 OLD name            load a .BAS file (or .BAC if you can read it)
-SAVE [name]         write the current program as .BAS
+OLD name.PAS        load Pascal source into memory
+SAVE [name]         write .BAS, or .PAS if the program in memory is Pascal
 REPLACE [name]      save, overwriting
-COMPILE [name]      compile to .BAC  (default protection <124>)
+COMPILE [name]      compile .BAS to .BAC, or .PAS to .PAC  (default <124>)
 COMPILE name<prot>  compile with an explicit protection code
-LIST [n[-m]]        list program lines
-RUN [name]          run (loads .BAC then .BAS if a name is given)
+LIST [n[-m]]        list BASIC lines, or the Pascal source in memory
+RUN [name]          run (.BAC, .PAC, .BAS, .PAS if a name is given)
+RUN name.ext        that file only
 RUNNH / LISTNH      same, without the header
 CONT                continue after STOP (not if the program was edited)
 RENUM [start][,inc] resequence lines, default 10,10
@@ -536,7 +540,7 @@ and attached switches work: SYSTAT/D, DISMOU DB1:, HLP DISK.
   SHOW  HELP
   CPU  HARDWARE
 
-Type HELP topic. Topics: LOGIN FILES BASIC LANG FN COMMANDS SYSTAT
+Type HELP topic. Topics: LOGIN FILES BASIC LANG PASCAL FN COMMANDS SYSTAT
 SHOW DISKS ACCOUNTS COMPILE HARDWARE TELNET JOBS SET QUE CCL QUOLST
 PLEASE
 `,
@@ -549,7 +553,7 @@ A topic is a command or subject name. Abbreviations match a unique
 prefix. Attached switches are ignored (HELP SYSTAT/D = HELP SYSTAT).
 
 Additional help is available on:
-  LOGIN FILES BASIC LANG FN COMMANDS SYSTAT SHOW DISKS
+  LOGIN FILES BASIC LANG PASCAL FN COMMANDS SYSTAT SHOW DISKS
   ACCOUNTS COMPILE HARDWARE TELNET JOBS SET QUE CCL QUOLST PLEASE HELP
 `,
 	"PLEASE": `PLEASE sends a message to the operator console (KB0:). Messages
@@ -606,10 +610,65 @@ logged in at once (zero means no limit).
 Unique prefixes work. Built-in commands always win, so you cannot
 replace DIR or SYSTAT. The program is RUN as if you had typed RUN filespec.
 `,
+	"PASCAL": `PASCAL is ISO 7185:1990 / ANSI/IEEE 770X3.97-1983 Level 1, the
+Jensen and Wirth language. Programs are type-checked and compiled to a
+private .PAC bytecode image here; they are not PDP-11 .TSK files. Source
+files use extension .PAS. COMPILE and RUN are the commands (the same
+as BASIC, with .PAC next to .BAC). LIST and TYPE cannot recover the
+source from a .PAC.
+
+  NEW FOO.PAS           start a Pascal program in memory
+  OLD FOO.PAS           load it
+  EDIT                  screen-edit that source (not numbered lines)
+  LIST                  print the source in memory
+  SAVE                  write FOO.PAS
+  COMPILE               write FOO.PAC from memory
+  RUN                   run the program in memory
+  COMPILE filespec      .BAS to .BAC, .PAS to .PAC
+  COMPILE name          .BAS, then .PAS, else the program in memory
+  COMPILE name<prot>    same, with protection  (default <124>)
+  RUN [name]            .BAC, then .PAC, then .BAS, then .PAS
+  RUN name.ext          that file only
+
+A .PAC with bits 64+128 (<232>) gives the job temporary privilege for
+that RUN, the same as a privileged .BAC. .PAS source never confers
+privilege. Only a privileged account may COMPILE with bit 128.
+
+PASCAL filespec is a synonym for COMPILE of a .PAS, so HELLO.PAS is
+not shadowed by HELLO.BAS.
+
+The required language is implemented: PROGRAM, LABEL CONST TYPE VAR,
+nested procedures and functions, FORWARD, value and VAR parameters,
+procedural and functional parameters, ISO conformant arrays (Level 1),
+INTEGER REAL BOOLEAN CHAR, enumerations, subranges (checked at run
+time), arrays, records and variants, sets of an ordinal type (span
+256), pointers with NEW and DISPOSE, FILE OF T with GET/PUT and the
+buffer variable f^, TEXT files, IF CASE WHILE REPEAT FOR WITH GOTO,
+PACK/UNPACK, WRITE/WRITELN :width and :width:decimals.
+
+ISO error conditions: unmatched CASE, FOR control must be a local
+entire variable and must not be assigned in the loop, GOTO may not
+enter a structured statement, DIV by zero, MOD requires a positive
+divisor, SUCC/PRED/CHR and subrange assignment out of range, VAR
+parameters need a variable.
+
+Predefined: MAXINT TRUE FALSE INPUT OUTPUT TEXT, and ABS SQR SIN COS
+EXP LN SQRT ARCTAN TRUNC ROUND ORD CHR SUCC PRED ODD EOF EOLN READ
+READLN WRITE WRITELN NEW DISPOSE RESET REWRITE GET PUT PAGE PACK UNPACK.
+
+Extensions (not required by ISO 7185): OTHERWISE in CASE, case labels
+1..n, and shorter string constants space-padded on assignment.
+
+Not implemented: packed bit-fields, UCSD USES/UNIT, variant storage
+overlay.
+
+Guest [100,100] has HELLO.PAS, FACT.PAS, and the Pascal games BAGELS,
+HAMURA, HUNT, MAZE, CHOMP and CRAPS. RUN BAGELS  or  RUN HELLO.PAS
+`,
 	"EDIT": `EDIT is a screen editor in the spirit of VTEDIT, the macro package
 RSTS sites layered on TECO for full-screen editing on a VT52.
 
-  EDIT                edit the program in memory
+  EDIT                edit the BASIC or Pascal program in memory
   EDIT filespec       edit a file  (created on write if it is new)
   VTEDIT              the same command
 
@@ -655,14 +714,15 @@ BASIC-PLUS programs, and TYPE / COPY for files.
 `,
 	"PDP": `Type HELP HARDWARE
 `,
-	"COMPILE": `COMPILE writes a compiled .BAC image of the program in memory.
-On RSTS/E V7.2 this was BASIC-PLUS P-code. Here COMPILE emits a private
-bytecode image (not Digital's P-code). RUN interprets that bytecode.
-LIST and TYPE cannot recover the source from a .BAC.
+	"COMPILE": `COMPILE writes a private bytecode image (not Digital's P-code).
+.BAS (or the program in memory) becomes a .BAC; .PAS becomes a .PAC.
+RUN interprets that bytecode. LIST and TYPE cannot recover the source.
 
-  COMPILE                 write ProgramName.BAC <124>
-  COMPILE PAYROL          write PAYROL.BAC <124>
-  COMPILE PAYROL<232>     write PAYROL.BAC with protection 232
+  COMPILE                 write ProgramName.BAC from BASIC memory,
+                          or ProgramName.PAC from Pascal memory
+  COMPILE PAYROL          .BAS then .PAS, else memory, to .BAC / .PAC
+  COMPILE PAYROL.PAS      that file only, to PAYROL.PAC
+  COMPILE PAYROL<232>     with protection 232 (privileged)
 
 Protection bits (V7.2):
   64   compiled / executable
@@ -674,12 +734,12 @@ Typical public privileged CUSP protection is <232>.
 NAME old.BAC AS old.BAC<232>   set the privilege bit after COMPILE
 PIP dest<232>=src              copy with a new protection
 
-RUN of a .BAC with bits 64+128 gives the job temporary privilege
-(JFSYS): same PPN, extra rights for the duration of the run.
-Privilege is dropped and the image is destroyed on END, STOP, or
-error, so a non-privileged user cannot LIST it.
+RUN of a .BAC or .PAC with bits 64+128 gives the job temporary
+privilege (JFSYS): same PPN, extra rights for the duration of the run.
+Privilege is dropped on END, STOP, or error. A privileged .BAC image
+is destroyed so a non-privileged user cannot LIST it.
 
-.BAS source never confers privilege, even if bit 128 is set.
+.BAS / .PAS source never confers privilege, even if bit 128 is set.
 Non-privileged users may RUN a public <232> file but cannot OLD,
 TYPE, or LIST it.
 
@@ -709,7 +769,7 @@ privileged user (REACT on a real system):
 CREATE of [1,*] is privileged. [1,2] cannot be deleted.
 An account that is logged in cannot be deleted.
 
-RUN of a <232> .BAC gives a normal user temporary privilege for
+RUN of a <232> .BAC or .PAC gives a normal user temporary privilege for
 that run only (see HELP COMPILE).
 `,
 }
@@ -1019,6 +1079,8 @@ type Shell struct {
 	ttype      string
 	logicals   map[string]string
 	console    bool
+	pascalOn   bool
+	pascalSrc  string
 }
 
 func NewShell(diskRoot string, login string, guest bool) (*Shell, error) {
@@ -1571,6 +1633,8 @@ func (s *Shell) dispatchCmd(verb, rest string) error {
 		return s.cmdSave(rest, true)
 	case "COMPILE", "COMPIL":
 		return s.cmdCompile(rest)
+	case "PASCAL":
+		return s.cmdPascal(rest)
 	case "LIST":
 		s.cmdList(rest, true)
 	case "LISTNH":
@@ -1687,6 +1751,7 @@ var keyboardCmds = []string{
 	"QUE", "QUMRUN", "CCL", "SUBMIT", "BATCH", "QUOLST", "QUOTA", "SHUTUP", "UTILITY",
 	"NEW", "OLD", "SAVE", "REPLACE", "COMPILE", "COMPIL",
 	"LIST", "LISTNH", "RUN", "RUNNH", "DELETE", "DEL", "CLEAR",
+	"PASCAL",
 	"SYSTAT", "SYS", "WHO",
 	"MOUNT", "DISMOUNT", "DSKINT", "INITIALIZE", "UMOUNT",
 	"DETACH", "ATTACH", "FORCE", "HANGUP", "BROADCAST", "SEND", "TALK", "PLEASE", "OPR",
@@ -1779,6 +1844,10 @@ func switchTokens(rest string) []string {
 }
 
 func (s *Shell) storeProgramLine(line string) {
+	if s.pascalOn {
+		fmt.Fprintln(s.out, "?Not a BASIC program")
+		return
+	}
 	i := 0
 	for i < len(line) && unicode.IsDigit(rune(line[i])) {
 		i++
@@ -2213,6 +2282,9 @@ func (s *Shell) syncJob() {
 	if s.Account != nil {
 		who = s.Account.Display()
 		what = s.Basic.ProgramName
+		if s.pascalOn && what != "" && what != "NONAME" {
+			what = what + ".PAS"
+		}
 		if what == "" || what == "NONAME" {
 			what = "Ready"
 		}
@@ -2261,6 +2333,7 @@ func (s *Shell) cmdBye(rest string) {
 	fmt.Fprintln(s.out)
 	fmt.Fprintf(s.out, "Job %d  User %s  logged off %s  at %s  %s\n\n",
 		s.Job, s.Account.PPN(), s.KB, NowDate(), NowTime())
+	s.leavePascal()
 	s.Basic.ClearProgram("NONAME")
 	s.tempPriv = false
 	if s.Basic != nil {
@@ -2355,6 +2428,7 @@ var helpAlias = map[string]string{
 	"PASSWORD": "ACCOUNTS", "REACT": "ACCOUNTS", "CREATE": "ACCOUNTS",
 	"NEW": "BASIC", "OLD": "BASIC", "SAVE": "BASIC", "RUN": "BASIC",
 	"LIST": "BASIC", "COMPILE": "COMPILE",
+	"PASCAL": "PASCAL", "OMSI": "PASCAL",
 	"ATTACH": "JOBS", "DETACH": "JOBS", "FORCE": "JOBS", "HANGUP": "JOBS",
 	"BROADCAST": "JOBS", "SEND": "JOBS", "TALK": "JOBS", "PK": "JOBS",
 	"RT11": "SYSTAT", "RSX": "SYSTAT", "RTS": "SYSTAT",
@@ -2475,6 +2549,9 @@ func (s *Shell) cmdType(rest string) error {
 	text, err := s.Disk.ReadText(spec, acct.Proj, acct.Prog, s.priv())
 	if err != nil {
 		return err
+	}
+	if strings.HasPrefix(text, bacMagic) || strings.HasPrefix(text, pacMagic) {
+		return fsErr("Compiled file")
 	}
 	fmt.Fprint(s.out, text)
 	if text != "" && !strings.HasSuffix(text, "\n") {
@@ -2733,16 +2810,29 @@ func (s *Shell) cmdEdit(rest string) error {
 	var save func(string) error
 
 	if name == "" {
-		if s.Basic.Compiled {
-			return fsErr("Compiled file")
+		if s.pascalOn {
+			prog := s.Basic.ProgramName
+			if prog == "" {
+				prog = "NONAME"
+			}
+			title = prog + ".PAS (memory)"
+			text = s.pascalSrc
+			save = func(body string) error {
+				s.pascalSrc = body
+				return nil
+			}
+		} else {
+			if s.Basic.Compiled {
+				return fsErr("Compiled file")
+			}
+			prog := s.Basic.ProgramName
+			if prog == "" {
+				prog = "NONAME"
+			}
+			title = prog + " (memory)"
+			text = s.Basic.SourceText()
+			save = func(body string) error { return s.editStoreProgram(prog, body) }
 		}
-		prog := s.Basic.ProgramName
-		if prog == "" {
-			prog = "NONAME"
-		}
-		title = prog + " (memory)"
-		text = s.Basic.SourceText()
-		save = func(body string) error { return s.editStoreProgram(prog, body) }
 	} else {
 		spec, err := s.parseSpec(name, "BAS")
 		if err != nil {
@@ -2754,7 +2844,7 @@ func (s *Shell) cmdEdit(rest string) error {
 			if err != nil {
 				return err
 			}
-			if strings.HasPrefix(text, bacMagic) {
+			if strings.HasPrefix(text, bacMagic) || strings.HasPrefix(text, pacMagic) {
 				return fsErr("Compiled file")
 			}
 			prot = s.fileProt(spec)
@@ -2794,6 +2884,9 @@ func (s *Shell) editStoreProgram(name, body string) error {
 
 // cmdRenum implements RENUM [start][,increment], defaulting to 10,10.
 func (s *Shell) cmdRenum(rest string) error {
+	if s.pascalOn {
+		return fsErr("Not a BASIC program")
+	}
 	start, step := 10, 10
 	fields := strings.FieldsFunc(rest, func(r rune) bool {
 		return r == ',' || r == ' ' || r == '\t'
@@ -2834,6 +2927,20 @@ func (s *Shell) cmdRenum(rest string) error {
 	return nil
 }
 
+func (s *Shell) enterPascal(name, src string) {
+	if name == "" {
+		name = "NONAME"
+	}
+	s.Basic.ClearProgram(name)
+	s.pascalOn = true
+	s.pascalSrc = src
+}
+
+func (s *Shell) leavePascal() {
+	s.pascalOn = false
+	s.pascalSrc = ""
+}
+
 func (s *Shell) cmdNew(rest string) {
 	name := strings.TrimSpace(rest)
 	if name == "" {
@@ -2848,10 +2955,17 @@ func (s *Shell) cmdNew(rest string) {
 	if name == "" {
 		name = "NONAME"
 	}
-	if i := strings.IndexByte(name, '.'); i >= 0 {
-		name = name[:i]
+	spec, err := ParseFileSpec(s.expandLogical(name), "BAS")
+	if err != nil {
+		fmt.Fprintf(s.out, "?%s\n", strings.TrimPrefix(err.Error(), "?"))
+		return
 	}
-	s.Basic.ClearProgram(name)
+	if spec.ExtGiven && spec.Ext == "PAS" {
+		s.enterPascal(spec.Name, "")
+	} else {
+		s.leavePascal()
+		s.Basic.ClearProgram(spec.Name)
+	}
 	s.syncJob()
 }
 
@@ -2876,13 +2990,23 @@ func (s *Shell) cmdOld(rest string) error {
 	if err != nil {
 		return err
 	}
-	if spec.Ext == "BAC" || strings.HasPrefix(text, bacMagic) {
+	if spec.Ext == "BAC" || spec.Ext == "PAC" || strings.HasPrefix(text, bacMagic) || strings.HasPrefix(text, pacMagic) {
+		if spec.Ext == "PAC" || strings.HasPrefix(text, pacMagic) {
+			return fsErr("Compiled file")
+		}
+		s.leavePascal()
 		if err := s.Basic.LoadCompiled(text, spec.Name, isPrivCompiled(s.fileProt(spec))); err != nil {
 			return err
 		}
 		s.syncJob()
 		return nil
 	}
+	if spec.Ext == "PAS" {
+		s.enterPascal(spec.Name, text)
+		s.syncJob()
+		return nil
+	}
+	s.leavePascal()
 	if err := s.Basic.LoadSource(text, spec.Name); err != nil {
 		return err
 	}
@@ -2920,7 +3044,11 @@ func (s *Shell) cmdSave(rest string, replace bool) error {
 			name = "NONAME"
 		}
 	}
-	spec, err := s.parseSpec(name, "BAS")
+	defExt := "BAS"
+	if s.pascalOn {
+		defExt = "PAS"
+	}
+	spec, err := s.parseSpec(name, defExt)
 	if err != nil {
 		return err
 	}
@@ -2929,17 +3057,40 @@ func (s *Shell) cmdSave(rest string, replace bool) error {
 		return nil
 	}
 	s.Basic.ProgramName = spec.Name
+	if s.pascalOn {
+		if spec.Ext == "BAC" || spec.Ext == "PAC" {
+			return fsErr("Compiled file")
+		}
+		if spec.ExtGiven && spec.Ext == "BAS" {
+			return fsErr("Not a Pascal program")
+		}
+		return s.Disk.WriteText(spec, acct.Proj, acct.Prog, s.priv(), s.pascalSrc, defaultProt)
+	}
 	if s.Basic.Compiled {
 		return fsErr("Compiled file")
+	}
+	if spec.ExtGiven && (spec.Ext == "PAS" || spec.Ext == "PAC") {
+		return fsErr("Not a BASIC program")
 	}
 	return s.Disk.WriteText(spec, acct.Proj, acct.Prog, s.priv(), s.Basic.SourceText(), defaultProt)
 }
 
 func (s *Shell) cmdList(rest string, heading bool) {
-	start, end, hasStart, hasEnd := parseLineRange(rest)
 	if heading {
 		fmt.Fprintf(s.out, "%s   %s    %s\n\n", s.Basic.ProgramName, NowTime(), NowDate())
 	}
+	if s.pascalOn {
+		if strings.TrimSpace(rest) != "" {
+			fmt.Fprintln(s.out, "?Illegal line number")
+			return
+		}
+		body := strings.TrimRight(s.pascalSrc, "\n")
+		if body != "" {
+			fmt.Fprintln(s.out, body)
+		}
+		return
+	}
+	start, end, hasStart, hasEnd := parseLineRange(rest)
 	if s.Basic.Compiled {
 		fmt.Fprintln(s.out, "?Compiled file")
 		return
@@ -2954,10 +3105,69 @@ func (s *Shell) cmdCompile(rest string) error {
 	if err != nil {
 		return err
 	}
+	name := strings.TrimSpace(rest)
+	if name == "" || strings.HasPrefix(name, "<") {
+		if s.pascalOn {
+			return s.compilePascalMemory(name)
+		}
+		return s.compileBasicMemory(name)
+	}
+	spec, err := s.parseSpec(name, "")
+	if err != nil {
+		return err
+	}
+	prot, err := s.compileProt(spec)
+	if err != nil {
+		return err
+	}
+	if spec.ExtGiven {
+		switch spec.Ext {
+		case "BAC", "PAC":
+			if !s.Disk.Exists(spec, acct.Proj, acct.Prog, s.priv()) {
+				return fsErr("Can't find file or account")
+			}
+			return fsErr("Compiled file")
+		case "PAS":
+			return s.compilePascalFile(spec, prot)
+		default:
+			return s.compileBasicFile(spec, prot)
+		}
+	}
+	bas := spec
+	bas.Ext = "BAS"
+	if s.Disk.Exists(bas, acct.Proj, acct.Prog, s.priv()) {
+		return s.compileBasicFile(bas, prot)
+	}
+	pas := spec
+	pas.Ext = "PAS"
+	if s.Disk.Exists(pas, acct.Proj, acct.Prog, s.priv()) {
+		return s.compilePascalFile(pas, prot)
+	}
+	if s.pascalOn {
+		return s.compilePascalMemory(name)
+	}
+	return s.compileBasicMemory(name)
+}
+
+func (s *Shell) compileProt(spec FileSpec) (int, error) {
+	prot := compiledProt
+	if spec.ProtSet {
+		prot = spec.Prot | protExecutable
+	}
+	if err := checkPrivProt(prot, s.accountPriv()); err != nil {
+		return 0, err
+	}
+	return prot, nil
+}
+
+func (s *Shell) compileBasicMemory(name string) error {
+	acct, err := s.needLogin()
+	if err != nil {
+		return err
+	}
 	if len(s.Basic.Program) == 0 {
 		return fsErr("No program")
 	}
-	name := strings.TrimSpace(rest)
 	if name == "" || strings.HasPrefix(name, "<") {
 		base := s.Basic.ProgramName
 		if base == "" {
@@ -2972,12 +3182,11 @@ func (s *Shell) cmdCompile(rest string) error {
 	if !spec.ExtGiven {
 		spec.Ext = "BAC"
 	}
-	prot := compiledProt
-	if spec.ProtSet {
-		prot = spec.Prot | protExecutable
-		spec.ProtSet = false
+	if spec.Ext == "PAS" || spec.Ext == "PAC" {
+		return fsErr("Not a BASIC program")
 	}
-	if err := checkPrivProt(prot, s.accountPriv()); err != nil {
+	prot, err := s.compileProt(spec)
+	if err != nil {
 		return err
 	}
 	s.Basic.ProgramName = spec.Name
@@ -2985,15 +3194,132 @@ func (s *Shell) cmdCompile(rest string) error {
 	if err != nil {
 		return err
 	}
-	return s.Disk.WriteText(spec, acct.Proj, acct.Prog, s.accountPriv(), wrapPcode(img), prot)
+	out := spec
+	out.Ext = "BAC"
+	out.ProtSet = false
+	return s.Disk.WriteText(out, acct.Proj, acct.Prog, s.accountPriv(), wrapPcode(img), prot)
+}
+
+func (s *Shell) compileBasicFile(spec FileSpec, prot int) error {
+	acct, err := s.needLogin()
+	if err != nil {
+		return err
+	}
+	text, err := s.Disk.ReadText(spec, acct.Proj, acct.Prog, s.priv())
+	if err != nil {
+		return err
+	}
+	if strings.HasPrefix(text, bacMagic) || strings.HasPrefix(text, pacMagic) {
+		return fsErr("Compiled file")
+	}
+	img, err := compileSourceText(text)
+	if err != nil {
+		return err
+	}
+	out := spec
+	out.Ext = "BAC"
+	out.ExtGiven = true
+	out.ProtSet = false
+	return s.Disk.WriteText(out, acct.Proj, acct.Prog, s.accountPriv(), wrapPcode(img), prot)
+}
+
+func (s *Shell) compilePascalFile(spec FileSpec, prot int) error {
+	acct, err := s.needLogin()
+	if err != nil {
+		return err
+	}
+	src, err := s.Disk.ReadText(spec, acct.Proj, acct.Prog, s.priv())
+	if err != nil {
+		return err
+	}
+	if strings.HasPrefix(src, bacMagic) || strings.HasPrefix(src, pacMagic) {
+		return fsErr("Compiled file")
+	}
+	body, err := CompilePascalPAC(src)
+	if err != nil {
+		fmt.Fprintln(s.out, err.Error())
+		return nil
+	}
+	out := spec
+	out.Ext = "PAC"
+	out.ExtGiven = true
+	out.ProtSet = false
+	if err := s.Disk.WriteText(out, acct.Proj, acct.Prog, s.accountPriv(), body, prot); err != nil {
+		return err
+	}
+	fmt.Fprintf(s.out, "%s compiled\n", spec.Name)
+	return nil
+}
+
+func (s *Shell) compilePascalMemory(name string) error {
+	acct, err := s.needLogin()
+	if err != nil {
+		return err
+	}
+	if strings.TrimSpace(s.pascalSrc) == "" {
+		return fsErr("No program")
+	}
+	if name == "" || strings.HasPrefix(name, "<") {
+		base := s.Basic.ProgramName
+		if base == "" {
+			base = "NONAME"
+		}
+		name = base + name
+	}
+	spec, err := s.parseSpec(name, "PAC")
+	if err != nil {
+		return err
+	}
+	if !spec.ExtGiven {
+		spec.Ext = "PAC"
+	}
+	if spec.Ext == "BAS" || spec.Ext == "BAC" {
+		return fsErr("Not a Pascal program")
+	}
+	prot, err := s.compileProt(spec)
+	if err != nil {
+		return err
+	}
+	s.Basic.ProgramName = spec.Name
+	body, err := CompilePascalPAC(s.pascalSrc)
+	if err != nil {
+		fmt.Fprintln(s.out, err.Error())
+		return nil
+	}
+	out := spec
+	out.Ext = "PAC"
+	out.ExtGiven = true
+	out.ProtSet = false
+	if err := s.Disk.WriteText(out, acct.Proj, acct.Prog, s.accountPriv(), body, prot); err != nil {
+		return err
+	}
+	fmt.Fprintf(s.out, "%s compiled\n", spec.Name)
+	return nil
 }
 
 func (s *Shell) cmdRun(rest string, heading bool) {
 	if strings.TrimSpace(rest) != "" {
-		if err := s.loadForRun(rest); err != nil {
+		spec, err := s.parseSpec(rest, "")
+		if err != nil {
 			fmt.Fprintf(s.out, "?%s\n", strings.TrimPrefix(err.Error(), "?"))
 			return
 		}
+		file, err := s.resolveRunFile(spec)
+		if err != nil {
+			fmt.Fprintf(s.out, "?%s\n", strings.TrimPrefix(err.Error(), "?"))
+			return
+		}
+		if file.Ext == "PAC" || file.Ext == "PAS" {
+			s.runPascalSpec(file, heading)
+			return
+		}
+		if err := s.loadRunFile(file); err != nil {
+			fmt.Fprintf(s.out, "?%s\n", strings.TrimPrefix(err.Error(), "?"))
+			return
+		}
+	} else if s.pascalOn {
+		s.runPascalMemory(heading)
+		return
 	}
 	if heading {
 		fmt.Fprintf(s.out, "%s   %s    %s\n\n", s.Basic.ProgramName, NowTime(), NowDate())
@@ -3006,6 +3332,175 @@ func (s *Shell) cmdRun(rest string, heading bool) {
 	s.syncJob()
 	err := s.Basic.RunProgram()
 	s.finishRun(err)
+}
+
+func (s *Shell) runPascalMemory(heading bool) {
+	if strings.TrimSpace(s.pascalSrc) == "" {
+		fmt.Fprintln(s.out, "?No program")
+		return
+	}
+	if heading {
+		fmt.Fprintf(s.out, "%s   %s    %s\n\n", s.Basic.ProgramName, NowTime(), NowDate())
+	}
+	s.inProgram = true
+	s.syncJob()
+	err := RunPascal(s.pascalSrc, s.pascalHost())
+	s.finishRun(err)
+}
+
+func (s *Shell) resolveRunFile(spec FileSpec) (FileSpec, error) {
+	acct, err := s.needLogin()
+	if err != nil {
+		return spec, err
+	}
+	if spec.ExtGiven {
+		if !s.Disk.Exists(spec, acct.Proj, acct.Prog, s.priv()) {
+			return spec, fsErr("Can't find file or account")
+		}
+		return spec, nil
+	}
+	for _, ext := range []string{"BAC", "PAC", "BAS", "PAS"} {
+		t := spec
+		t.Ext = ext
+		if s.Disk.Exists(t, acct.Proj, acct.Prog, s.priv()) {
+			return t, nil
+		}
+	}
+	return spec, fsErr("Can't find file or account")
+}
+
+func (s *Shell) loadRunFile(spec FileSpec) error {
+	if spec.Ext == "BAC" || spec.Ext == "PAC" {
+		return s.loadCompiledSpec(spec)
+	}
+	return s.loadSourceSpec(spec)
+}
+
+func (s *Shell) cmdPascal(rest string) error {
+	if _, err := s.needLogin(); err != nil {
+		return err
+	}
+	rest = strings.TrimSpace(rest)
+	if strings.HasPrefix(rest, "/") {
+		i := 1
+		for i < len(rest) && rest[i] != '/' && !unicode.IsSpace(rune(rest[i])) {
+			i++
+		}
+		sw := strings.ToUpper(rest[1:i])
+		if sw != "" && strings.HasPrefix("RUN", sw) {
+			rest = strings.TrimSpace(rest[i:])
+			if rest == "" {
+				return fsErr("PASCAL filespec")
+			}
+			spec, err := s.parseSpec(rest, "PAS")
+			if err != nil {
+				return err
+			}
+			if !spec.ExtGiven {
+				spec.Ext = "PAS"
+			}
+			s.runPascalSpec(spec, false)
+			return nil
+		}
+	}
+	if rest == "" {
+		return fsErr("PASCAL filespec")
+	}
+	spec, err := s.parseSpec(rest, "PAS")
+	if err != nil {
+		return err
+	}
+	if !spec.ExtGiven {
+		spec.Ext = "PAS"
+	}
+	prot, err := s.compileProt(spec)
+	if err != nil {
+		return err
+	}
+	return s.compilePascalFile(spec, prot)
+}
+
+func (s *Shell) runPascalSpec(spec FileSpec, heading bool) {
+	if heading {
+		fmt.Fprintf(s.out, "%s   %s    %s\n\n", spec.Name, NowTime(), NowDate())
+	}
+	s.inProgram = true
+	s.syncJob()
+	var err error
+	if spec.Ext == "PAC" {
+		err = s.runPascalPAC(spec)
+	} else {
+		src, e := s.readPascalSource(spec)
+		if e != nil {
+			s.finishRun(e)
+			return
+		}
+		err = RunPascal(src, s.pascalHost())
+	}
+	s.finishRun(err)
+}
+
+func (s *Shell) runPascalPAC(spec FileSpec) error {
+	acct, err := s.needLogin()
+	if err != nil {
+		return err
+	}
+	text, prot, err := s.Disk.ReadExecute(spec, acct.Proj, acct.Prog, s.priv())
+	if err != nil {
+		return err
+	}
+	img, err := unmarshalPAC(text)
+	if err != nil {
+		return err
+	}
+	if isPrivCompiled(prot) {
+		s.tempPriv = true
+		s.syncPrivilege()
+	}
+	return runPascalImage(img, s.pascalHost())
+}
+
+func (s *Shell) readPascalSource(spec FileSpec) (string, error) {
+	acct, err := s.needLogin()
+	if err != nil {
+		return "", err
+	}
+	return s.Disk.ReadText(spec, acct.Proj, acct.Prog, s.priv())
+}
+
+func (s *Shell) pascalHost() PascalHost {
+	h := PascalHost{
+		Write: func(text string) {
+			s.write(text, false)
+		},
+		ReadLine: func() (string, error) {
+			return s.read("")
+		},
+		PollStop: s.Basic.IO.PollInterrupt,
+	}
+	h.OpenRead = func(name string) (string, error) {
+		acct, err := s.needLogin()
+		if err != nil {
+			return "", err
+		}
+		spec, err := s.parseSpec(name, "DAT")
+		if err != nil {
+			return "", err
+		}
+		return s.Disk.ReadText(spec, acct.Proj, acct.Prog, s.priv())
+	}
+	h.OpenWrite = func(name, body string) error {
+		acct, err := s.needLogin()
+		if err != nil {
+			return err
+		}
+		spec, err := s.parseSpec(name, "DAT")
+		if err != nil {
+			return err
+		}
+		return s.Disk.WriteText(spec, acct.Proj, acct.Prog, s.priv(), body, defaultProt)
+	}
+	return h
 }
 
 func (s *Shell) cmdCont() {
@@ -3054,6 +3549,9 @@ func (s *Shell) loadForRun(name string) error {
 	}
 	tryBAC := !spec.ExtGiven || spec.Ext == "BAC"
 	tryBAS := !spec.ExtGiven || spec.Ext == "BAS"
+	if spec.ExtGiven && (spec.Ext == "PAS" || spec.Ext == "PAC") {
+		return fsErr("Not a BASIC program")
+	}
 	if spec.ExtGiven && spec.Ext != "BAC" && spec.Ext != "BAS" {
 		return s.loadSourceSpec(spec)
 	}
@@ -3084,6 +3582,7 @@ func (s *Shell) loadSourceSpec(spec FileSpec) error {
 	if err != nil {
 		return err
 	}
+	s.leavePascal()
 	if err := s.Basic.LoadSource(text, spec.Name); err != nil {
 		return err
 	}
@@ -3100,6 +3599,7 @@ func (s *Shell) loadCompiledSpec(spec FileSpec) error {
 	if err != nil {
 		return err
 	}
+	s.leavePascal()
 	if err := s.Basic.LoadCompiled(text, spec.Name, isPrivCompiled(prot)); err != nil {
 		return err
 	}
@@ -3114,6 +3614,9 @@ func (s *Shell) cmdDelete(rest string) error {
 		return nil
 	}
 	if unicode.IsDigit(rune(token[0])) {
+		if s.pascalOn {
+			return fsErr("Not a BASIC program")
+		}
 		start, end, hasStart, hasEnd := parseLineRange(token)
 		if !hasStart {
 			fmt.Fprintln(s.out, "?Illegal line number")

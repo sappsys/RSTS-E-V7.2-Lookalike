@@ -195,6 +195,25 @@ func TestRefreshesUntouchedUserSample(t *testing.T) {
 	}
 }
 
+func TestRestoresMissingGuestSample(t *testing.T) {
+	root := filepath.Join(t.TempDir(), "disk")
+	newSystemIn(t, root)
+
+	path := filepath.Join(root, "SY", "100,100", "HELLO.PAS")
+	if err := os.Remove(path); err != nil {
+		t.Fatal(err)
+	}
+
+	newSystemIn(t, root)
+	got, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("missing guest sample was not restored: %v", err)
+	}
+	if string(got) != samples["100,100"]["HELLO.PAS"] {
+		t.Fatalf("restored HELLO.PAS does not match the sample")
+	}
+}
+
 func TestRepairsDeletedAccountDirectories(t *testing.T) {
 	root := filepath.Join(t.TempDir(), "disk")
 	newSystemIn(t, root)

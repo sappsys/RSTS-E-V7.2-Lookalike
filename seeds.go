@@ -46,6 +46,7 @@ func (s seeds) replaces(path, body string, proj, prog int) bool {
 		return true
 	}
 	if string(onDisk) == body {
+		s.record(path, body)
 		return false
 	}
 	// [1,2] holds the notice, the CUSPs and the exerciser. Those are

@@ -6,9 +6,44 @@ Newest first.
 The system portrayed is RSTS/E V7.2 on a PDP-11/70, and that does not
 change. DEC numbered the update level after the dash -- V7.2-10 was a
 real one -- and this project uses that number for its own releases. So
-V7.2-10 is the first release here, V7.2-11 this one, and the emulator
-identifies itself with whichever it is built from: SYS(CHR$(1)) and the
-login banner both report it.
+V7.2-10 is the first release here, V7.2-11 the second, V7.2-12 this
+one, and the emulator identifies itself with whichever it is built
+from: SYS(CHR$(1)) and the login banner both report it.
+
+
+V7.2-12   20-Aug-2026
+---------------------
+
+Third tagged release.
+https://github.com/sappsys/RSTS-E-V7.2-Lookalike/releases/tag/V7.2-12
+
+  NEW FOO.PAS, OLD FOO.PAS, LIST, EDIT, SAVE, COMPILE and RUN work on a
+  Pascal program in memory, the same workspace as BASIC. Pascal has no
+  line numbers, so EDIT is how the source is changed; numbered lines
+  are rejected until NEW or OLD of a BASIC program.
+
+  Guest [100,100] has a set of classic BASIC-PLUS games: NIM (21 matches),
+  HANGMN, TICTAC, LANDER, WUMPUS, BLACKJ, SLOTS and ACEY, next to the
+  GUESS that was already there. OLD name, then RUN.
+
+  The same account has Pascal games that run from .PAS source or a
+  compiled .PAC: BAGELS (pico/fermi), HAMURA (Hammurabi), HUNT (Wumpus),
+  MAZE, CHOMP and CRAPS. RUN BAGELS or RUN HUNT.PAS. They do not
+  collide with the BASIC names.
+
+  PASCAL is ISO 7185:1990 / ANSI/IEEE 770X3.97-1983 Level 1 (conformant
+  arrays), the Jensen and Wirth language, type-checked and compiled to a
+  private .PAC bytecode image rather than as a PDP-11 .TSK. COMPILE FOO
+  looks for FOO.BAS then FOO.PAS (or the program in memory); COMPILE
+  FOO.PAS writes FOO.PAC. RUN FOO looks for .BAC, .PAC, .BAS, .PAS; a
+  name with an extension is that file only. COMPILE name<232> may mark
+  a .PAC privileged, the same as a .BAC. Unmatched CASE, FOR-control
+  and GOTO restrictions, DIV/MOD, SUCC/PRED/CHR and subrange assignment
+  follow the standard. OTHERWISE and 1..n case labels are kept as
+  extensions (ISO 10206). Nested procedures, VAR and procedural
+  parameters, records, variants, sets, pointers, GET/PUT, PACK/UNPACK,
+  and formatted WRITE are included. Guest [100,100] has HELLO.PAS and
+  FACT.PAS.
 
 
 V7.2-11   18-Aug-2026

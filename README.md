@@ -1,12 +1,12 @@
 # RSTS/E V7.2
 
-Go recreation of **RSTS/E V7.2** on a **PDP-11/70**: a `Bye` / `Ready` timesharing CLI, PPN file storage, disk packs, jobs, Telnet, and a **BASIC-PLUS** compiler/VM.
+Go recreation of **RSTS/E V7.2** on a **PDP-11/70**: a `Bye` / `Ready` timesharing CLI, PPN file storage, disk packs, jobs, Telnet, a **BASIC-PLUS** compiler/VM, and **Pascal** (ISO 7185 / ANSI X3.97).
 
 This is **not** a PDP-11 CPU emulator and **not** RSTS/E V9/V10 (no DCL as the default CLI). It is a user environment that talks and behaves like V7.2.
 
 ## Version
 
-The system portrayed is **RSTS/E V7.2** on a PDP-11/70, and that does not change. DEC numbered the update level after the dash — `V7.2-10` was a real one — and this project uses that number for its own releases. `V7.2-10` is the first release, `V7.2-11` this one, and the emulator reports whichever it was built from: `SYS(CHR$(1))`, the login banner, and `--version` all agree.
+The system portrayed is **RSTS/E V7.2** on a PDP-11/70, and that does not change. DEC numbered the update level after the dash — `V7.2-10` was a real one — and this project uses that number for its own releases. `V7.2-10` is the first release, `V7.2-11` the second, `V7.2-12` this one, and the emulator reports whichever it was built from: `SYS(CHR$(1))`, the login banner, and `--version` all agree.
 
 Releases are on [GitHub](https://github.com/sappsys/RSTS-E-V7.2-Lookalike/releases); changes are in [CHANGELOG.txt](CHANGELOG.txt).
 
@@ -82,7 +82,7 @@ Options:
 | `--login NAME` | Prompt for that account's password |
 | `--no-console` | Telnet and serial only |
 | `--no-telnet` | Console and serial only |
-| `--version` | Print the release and CPU, e.g. `RSTS V7.2-11  (PDP-11/70)` |
+| `--version` | Print the release and CPU, e.g. `RSTS V7.2-12  (PDP-11/70)` |
 
 `config.toml` lists every setting. Commented lines are defaults, or options that are not in use. Uncomment a line to override (`--disk`, `--port`, `--guest`, `--login`, `--no-console`, `--no-telnet` still win).
 
@@ -154,7 +154,7 @@ HELLO
 Account or Name: GUEST
 Password:
 
-RSTS V7.2-11  Job 1  KB0  17-Aug-26  7:23 PM
+RSTS V7.2-12  Job 1  KB0  17-Aug-26  7:23 PM
 User:  100,100
 
 Ready
@@ -215,7 +215,8 @@ disk/
   accounts.json      SYSTEM [1,2], GUEST [100,100], DEMO [200,200]
   packs.json         SY0:/DB0: SYSDSK, DB1:, DL0:, DL1:, DM0:
   SY/1,2/            NOTICE.TXT, LOGIN.TXT, WHOAMI.BAS/.BAC, DATA.BAS, COMP.BAS
-  SY/100,100/        HELLO, GUESS, FIB, STARS, ... (sample programs)
+  SY/100,100/        HELLO, GUESS, NIM, HANGMN, TICTAC, LANDER, WUMPUS,
+                     BLACKJ, SLOTS, ACEY, and the other guest samples
   SY/200,200/        HELLO, SIEVE
   DB1/               the sample PAYROL pack, initialized but unmounted
 config.toml          every key listed; defaults and unused stay commented
@@ -237,6 +238,8 @@ Type `HELP` or `HELP topic`. Abbreviations and CUSP names work (`HELP DISK` = `H
 | `FILES` | DIR, TYPE, COPY, PIP, KILL, NAME, ASSIGN, filespecs |
 | `BASIC` | NEW, OLD, SAVE, COMPILE, LIST, RUN, CONT |
 | `LANG` | BASIC-PLUS statements and modifiers |
+| `PASCAL` | ISO 7185 / ANSI Pascal |
+| `EDIT` | Screen editor (VTEDIT style) |
 | `FN` | Built-in functions and SYS |
 | `COMMANDS` | Keyboard command list |
 | `SET` | TTYSET (WIDTH, ECHO, SCOPE, TAB, FORM, FILL, GAG, SPEED, TYPE) |
@@ -244,7 +247,7 @@ Type `HELP` or `HELP topic`. Abbreviations and CUSP names work (`HELP DISK` = `H
 | `SHOW` | SHOW aliases for SYSTAT |
 | `DISKS` | MOUNT, DISMOUNT, DSKINT, packs |
 | `ACCOUNTS` | Logins and REACT |
-| `COMPILE` | `.BAC` bytecode and the privilege bit |
+| `COMPILE` | `.BAC` / `.PAC` bytecode and the privilege bit |
 | `HARDWARE` | PDP-11/70 configuration and PEEK |
 | `TELNET` | Multi-user Telnet / VT52 |
 | `JOBS` | SYSTAT, ATTACH, PK: |
@@ -277,14 +280,14 @@ Type `HELP` or `HELP topic`. Abbreviations and CUSP names work (`HELP DISK` = `H
 
 | Command | |
 |---------|-|
-| `NEW [name]` | Clear memory |
-| `OLD name` | Load `.BAS` (or `.BAC` if readable) |
-| `SAVE` / `REPLACE` `[name]` | Write `.BAS` |
-| `COMPILE [name][<prot>]` | Compile to `.BAC` (default `<124>`) |
-| `LIST` / `LISTNH` `[n[-m]]` | List source |
-| `RUN` / `RUNNH` `[name]` | Run (tries `.BAC` then `.BAS`) |
+| `NEW [name]` | Clear memory. `NEW FOO.PAS` starts a Pascal program |
+| `OLD name` | Load `.BAS` (or `.BAC` if readable). `OLD FOO.PAS` loads Pascal |
+| `SAVE` / `REPLACE` `[name]` | Write `.BAS`, or `.PAS` if the program in memory is Pascal |
+| `COMPILE [name][<prot>]` | Compile `.BAS` to `.BAC` or `.PAS` to `.PAC` (default `<124>`) |
+| `LIST` / `LISTNH` `[n[-m]]` | List BASIC lines, or the Pascal source in memory |
+| `RUN` / `RUNNH` `[name]` | Run (`.BAC`, `.PAC`, `.BAS`, `.PAS`; a name with an extension is that file only) |
 | `CONT` | Continue after `STOP` (fails if the program was edited) |
-| `EDIT` / `VTEDIT` `[filespec]` | Screen editor: the program in memory, or a file |
+| `EDIT` / `VTEDIT` `[filespec]` | Screen editor: the program in memory (BASIC or Pascal), or a file |
 | `RENUM` / `RENUMBER` `[start][,inc]` | Resequence lines, default `10,10` |
 | `DELETE n[-m]` | Delete program lines |
 | `CLEAR` | Reset variables |
@@ -309,7 +312,7 @@ Immediate mode (no line number) is accepted at Ready: `PRINT 1+2`.
 RSTS itself had **TECO**, and sites layered the **VTEDIT** macro package on it to get full-screen editing on a VT52. TECO is not installed here; `EDIT` is a screen editor in that spirit.
 
 ```text
-EDIT                edit the BASIC program in memory
+EDIT                edit the BASIC or Pascal program in memory
 EDIT NOTES.TXT      edit a file, created on write if new
 VTEDIT              the same command
 ```
@@ -491,7 +494,7 @@ PAYROL:NAME.EXT
 NAME.EXT<prot>
 ```
 
-OLD/SAVE default extension `.BAS`. COMPILE default `.BAC`.
+OLD/SAVE default extension `.BAS`. COMPILE writes `.BAC` from `.BAS`, `.PAC` from `.PAS`.
 
 Protection (V7.2): default **60**. Bit **64** = compiled/executable. Bit **128** = privileged (only with 64, and only `[1,*]` may set it).
 
@@ -541,11 +544,43 @@ Character devices open like files: `OPEN "KB:" AS FILE 1` is your own terminal a
 
 `OPEN "PK:" AS FILE n` assigns a pseudo keyboard and forks a job. `PRINT #n` sends keystrokes; `INPUT #n` / `LINE INPUT #n` reads output; `CLOSE #n` hangs up the child. Demo: `OLD PK` then `RUN` on GUEST.
 
+## Pascal
+
+This is **ISO 7185:1990 / ANSI/IEEE 770X3.97-1983** Pascal (Level 1: conformant arrays), the Jensen and Wirth language. It is type-checked and compiled to a private `.PAC` bytecode image here, not a MACRO-11 `.TSK`. `HELP PASCAL` is the dialect that actually runs. Source files use extension `.PAS`.
+
+```text
+NEW HELLO.PAS         start a Pascal program in memory
+EDIT                  screen-edit that source
+LIST                  print it
+SAVE                  write HELLO.PAS
+COMPILE               write HELLO.PAC from memory
+RUN                   run the program in memory
+COMPILE HELLO.PAS     compile HELLO.PAS to HELLO.PAC
+COMPILE FACT          FACT.PAS (no FACT.BAS) to FACT.PAC
+COMPILE FACT<232>     same, privileged (SYSTEM)
+RUN FACT.PAS          compile-and-go (with the RUN header)
+RUN FACT.PAC          run compiled Pascal
+RUN FACT              .BAC, then .PAC, then .BAS, then .PAS
+RUN HELLO.PAS         Pascal hello (RUN HELLO is HELLO.BAS)
+```
+
+Covered: `PROGRAM` blocks, `LABEL` `CONST` `TYPE` `VAR` (including constant expressions), nested procedures and functions with a static link, `FORWARD`, value and `VAR` parameters, procedural and functional parameters, ISO conformant arrays, `INTEGER` `REAL` `BOOLEAN` `CHAR`, enumerations, subranges with run-time range checks, arrays (`PACKED ARRAY OF CHAR` is a string), records and variants, sets of an ordinal type (span 256), pointers with `NEW` / `DISPOSE`, `FILE OF T` with `GET` / `PUT` and the buffer variable `f^`, `TEXT` files, `IF` `CASE` `WHILE` `REPEAT` `FOR` `WITH` `GOTO`, `PACK` / `UNPACK`, `READ` / `READLN` / `WRITE` / `WRITELN` with `:width` and `:width:decimals`.
+
+ISO error conditions that are enforced: unmatched `CASE`, `FOR` control must be a local entire variable and must not be assigned in the loop, `GOTO` may not jump into a structured statement, `DIV` by zero, `MOD` with a non-positive divisor, `SUCC` / `PRED` / `CHR` and subrange assignment out of range, `VAR` actuals must be variables.
+
+Predefined: `MAXINT` (2147483647), `TRUE` `FALSE`, `INPUT` `OUTPUT` `TEXT`, and `ABS SQR SIN COS EXP LN SQRT ARCTAN TRUNC ROUND ORD CHR SUCC PRED ODD EOF EOLN READ READLN WRITE WRITELN NEW DISPOSE RESET REWRITE GET PUT PAGE PACK UNPACK`.
+
+Extensions beyond ISO 7185: `OTHERWISE` in `CASE`, case labels `1..n` (ISO 10206), shorter string constants space-padded on assignment.
+
+Not implemented: packed bit-fields, UCSD `USES`/`UNIT`, variant fields overlaying the same storage.
+
+Guest `[100,100]` has `HELLO.PAS`, `FACT.PAS`, and Pascal games `BAGELS`, `HAMURA`, `HUNT`, `MAZE`, `CHOMP`, `CRAPS`. `RUN BAGELS` or `RUN HELLO.PAS`.
+
 ## COMPILE and bytecode
 
-On a real V7.2 system, `COMPILE` wrote BASIC-PLUS P-code into a `.BAC`. Here `COMPILE` emits a **private bytecode** image (not Digital’s P-code). `RUN`, `COMPILE`, and immediate mode all execute that VM. A real RSTS `.BAC` will not load; these files will not run on an 11/70.
+On a real V7.2 system, `COMPILE` wrote BASIC-PLUS P-code into a `.BAC`. Here `COMPILE` emits a **private bytecode** image (not Digital’s P-code): `.BAS` or the BASIC program in memory becomes a `.BAC`, `.PAS` or the Pascal program in memory becomes a `.PAC` (`RSTS/E PAC V7`). `RUN` of a name tries `.BAC`, then `.PAC`, then `.BAS`, then `.PAS`. A filespec with an extension is that file only. These files are not Digital P-code, not UCSD P-code, and not a PDP-11 `.TSK`.
 
-`LIST` / `TYPE` cannot recover source from a `.BAC`. `COMPILE` leaves the source in memory; `OLD` of a `.BAC` loads bytecode only.
+`LIST` / `TYPE` cannot recover source from a `.BAC` or a `.PAC`. `COMPILE` of the program in memory leaves that source in memory; `OLD` of a `.BAC` loads bytecode only. A `.PAC` with protection bits 64+128 (`<232>`) grants temporary privilege for that `RUN`, the same as a privileged `.BAC`.
 
 When extending BASIC, add an opcode in `pcode.go`, emission in `pcode_compile.go`, and a VM case in `pcode_vm.go`.
 
@@ -578,7 +613,7 @@ Seeded onto a new disk:
 | Account | Files |
 |---------|--------|
 | `[1,2]` | `NOTICE.TXT`, `LOGIN.TXT`, `WHOAMI.BAS` / `WHOAMI.BAC<232>`, `DATA.BAS`, `COMP.BAS` |
-| `[100,100]` | `HELLO`, `GUESS`, `FIB`, `STARS`, `TABLE`, `NOTE`, `WHILE`, `UNTIL`, `CHANGE`, `USING`, `ERRDEMO`, `MODS`, `CPU`, `PK`, `README.TXT` |
+| `[100,100]` | `HELLO`, `GUESS`, `NIM`, `HANGMN`, `TICTAC`, `LANDER`, `WUMPUS`, `BLACKJ`, `SLOTS`, `ACEY`, `FIB`, `STARS`, `TABLE`, `NOTE`, `WHILE`, `UNTIL`, `CHANGE`, `USING`, `ERRDEMO`, `MODS`, `CPU`, `PK`, `README.TXT` |
 | `[200,200]` | `HELLO`, `SIEVE` |
 
 `COMP.BAS` is the self-checking exerciser: it covers every statement, modifier, and function this system implements, prints `FAIL n` for any check that does not hold, and ends with `ALL PASSED: n`. It lives on `[1,2]` only, because its last test `CHAIN`s back to itself at line 8000 with `COMMON` carrying the totals, then `KILL`s its scratch files. Log in as SYSTEM and type `RUN COMP`. (`CONT` is a keyboard command, so it cannot be exercised from inside a program.)
