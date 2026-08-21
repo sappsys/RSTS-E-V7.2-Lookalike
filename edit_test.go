@@ -412,7 +412,7 @@ func TestEditRespectsProtection(t *testing.T) {
 	}
 	sh.Login("GUEST", "GUEST")
 	sh.term = &scriptTerm{keys: []byte{ctrlC}}
-	if err := sh.cmdEdit("$WHOAMI.BAC"); err == nil {
+	if err := sh.cmdEdit("[1,9]WHOAMI.BAC"); err == nil {
 		t.Fatal("a guest should not be able to edit a privileged .BAC")
 	}
 }

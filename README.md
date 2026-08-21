@@ -6,7 +6,7 @@ This is **not** a PDP-11 CPU emulator and **not** RSTS/E V9/V10 (no DCL as the d
 
 ## Version
 
-The system portrayed is **RSTS/E V7.2** on a PDP-11/70, and that does not change. DEC numbered the update level after the dash — `V7.2-10` was a real one — and this project uses that number for its own releases. `V7.2-10` is the first release, `V7.2-11` the second, `V7.2-12` this one, and the emulator reports whichever it was built from: `SYS(CHR$(1))`, the login banner, and `--version` all agree.
+The system portrayed is **RSTS/E V7.2** on a PDP-11/70, and that does not change. DEC numbered the update level after the dash — `V7.2-10` was a real one — and this project uses that number for its own releases. `V7.2-10` is the first release, `V7.2-11` the second, `V7.2-12` the third, `V7.2-13` this one, and the emulator reports whichever it was built from: `SYS(CHR$(1))`, the login banner, and `--version` all agree.
 
 Releases are on [GitHub](https://github.com/sappsys/RSTS-E-V7.2-Lookalike/releases); changes are in [CHANGELOG.txt](CHANGELOG.txt).
 
@@ -80,9 +80,10 @@ Options:
 | `--port N` | Telnet port (overrides config) |
 | `--guest` | Log in as GUEST automatically |
 | `--login NAME` | Prompt for that account's password |
+| `--init` | INIT dialogue on the console before timesharing |
 | `--no-console` | Telnet and serial only |
 | `--no-telnet` | Console and serial only |
-| `--version` | Print the release and CPU, e.g. `RSTS V7.2-12  (PDP-11/70)` |
+| `--version` | Print the release and CPU, e.g. `RSTS V7.2-13  (PDP-11/70)` |
 
 `config.toml` lists every setting. Commented lines are defaults, or options that are not in use. Uncomment a line to override (`--disk`, `--port`, `--guest`, `--login`, `--no-console`, `--no-telnet` still win).
 
@@ -154,7 +155,7 @@ HELLO
 Account or Name: GUEST
 Password:
 
-RSTS V7.2-12  Job 1  KB0  17-Aug-26  7:23 PM
+RSTS V7.2-13  Job 1  KB0  17-Aug-26  7:23 PM
 User:  100,100
 
 Ready
@@ -181,30 +182,31 @@ Unique command prefixes and attached switches work the V7 CCL way: `SYSTAT/D`, `
 
 | Name | PPN | Password | Notes |
 |------|-----|----------|--------|
-| SYSTEM | `[1,2]` | SYSTEM | Privileged (`[1,*]` is V7 JFSYS) |
+| SYSTEM | `[1,2]` | SYSTEM | System library CUSPs |
+| LIBRARY | `[1,9]` | LIBRARY | Stock programs (`COMP`, `DATA`, `WHOAMI`) |
 | GUEST | `[100,100]` | GUEST | Sample programs |
 | DEMO | `[200,200]` | DEMO | Sieve demo |
 
-These three are seeded the first time the emulator runs. See [First run](#first-run).
+These four are seeded the first time the emulator runs. See [First run](#first-run).
 
-Privilege is V7-style: project `[1,*]` is privileged. A compiled `.BAC` with protection bits 64+128 (typical public privileged `<232>`) grants **temporary privilege** for that `RUN` only; the image is dropped on exit. `.BAS` source never confers privilege.
+Privilege is V7-style: every `[1,*]` account is privileged. A compiled `.BAC` with protection bits 64+128 (typical public privileged `<232>`) grants **temporary privilege** for that `RUN` only; the image is dropped on exit. `.BAS` source never confers privilege.
 
 Privileged account commands (REACT-style):
 
 ```text
-CREATE [p,pn] NAME n PASSWORD pw
-CREATE/ACCOUNT [p,pn] n pw
-DELETE/ACCOUNT [p,pn]
-REMOVE [p,pn]
+CREATE [p,pn] NAME n PASSWORD pw     (privileged)
+CREATE/ACCOUNT [p,pn] n pw           (privileged)
+DELETE/ACCOUNT [p,pn]                (privileged)
+REMOVE [p,pn]                        (privileged)
 PASSWORD                  change your own
-PASSWORD [p,pn] [new]     set another account
-SHOW ACCOUNTS
-REACT CREATE / DELETE / PASSWORD / LIST
-REACT QUOTA [p,pn] n
-REACT JOBQUOTA [p,pn] n
+PASSWORD [p,pn] [new]     (privileged) set another account
+SHOW ACCOUNTS             (privileged)
+REACT CREATE / DELETE / PASSWORD / LIST   (privileged)
+REACT QUOTA [p,pn] n      (privileged)
+REACT JOBQUOTA [p,pn] n   (privileged)
 ```
 
-`[1,2]` cannot be deleted. An account that is logged in cannot be deleted. Creating `[1,*]` requires privilege.
+`[1,2]` and `[1,9]` cannot be deleted. An account that is logged in cannot be deleted. Creating `[1,*]` requires privilege.
 
 ## First run
 
@@ -212,9 +214,10 @@ The emulator needs nothing set up in advance. Run the binary in any directory an
 
 ```text
 disk/
-  accounts.json      SYSTEM [1,2], GUEST [100,100], DEMO [200,200]
+  accounts.json      SYSTEM [1,2], LIBRARY [1,9], GUEST [100,100], DEMO [200,200]
   packs.json         SY0:/DB0: SYSDSK, DB1:, DL0:, DL1:, DM0:
-  SY/1,2/            NOTICE.TXT, LOGIN.TXT, WHOAMI.BAS/.BAC, DATA.BAS, COMP.BAS
+  SY/1,2/            NOTICE.TXT, LOGIN.TXT, and the library CUSPs
+  SY/1,9/            LOGIN.TXT, WHOAMI.BAS/.BAC, DATA.BAS, COMP.BAS
   SY/100,100/        HELLO, GUESS, NIM, HANGMN, TICTAC, LANDER, WUMPUS,
                      BLACKJ, SLOTS, ACEY, and the other guest samples
   SY/200,200/        HELLO, SIEVE
@@ -224,7 +227,7 @@ config.toml          every key listed; defaults and unused stay commented
 
 The disk root is `./disk`, or `$RSTS_DISK`, or `--disk DIR`; missing parent directories are created. Everything is rechecked at each start, so deleting an account directory or a sample program restores it on the next run.
 
-A damaged `accounts.json` or `packs.json` does not stop the system. The unreadable file is renamed to `NAME.json.bad` and rebuilt from defaults, with a note on stderr. `[1,2]` is structural — `DELETE/ACCOUNT` refuses to remove it, and it is restored if the file is edited to drop it, since otherwise nothing could administer the system. Deleting `GUEST` or `DEMO` is respected and they stay gone.
+A damaged `accounts.json` or `packs.json` does not stop the system. The unreadable file is renamed to `NAME.json.bad` and rebuilt from defaults, with a note on stderr. `[1,2]` and `[1,9]` are structural — `DELETE/ACCOUNT` refuses to remove them, and they are restored if the file is edited to drop them, since otherwise the system library and stock programs would vanish. Deleting `GUEST` or `DEMO` is respected and they stay gone.
 
 A `config.toml` with a bad setting *is* reported as an error rather than overwritten, so a typo cannot silently reset the system's configuration.
 
@@ -249,6 +252,8 @@ Type `HELP` or `HELP topic`. Abbreviations and CUSP names work (`HELP DISK` = `H
 | `ACCOUNTS` | Logins and REACT |
 | `COMPILE` | `.BAC` / `.PAC` bytecode and the privilege bit |
 | `HARDWARE` | PDP-11/70 configuration and PEEK |
+| `SWITCH` | BASIC / RSX run-time systems |
+| `INIT` | Startup before timesharing |
 | `TELNET` | Multi-user Telnet / VT52 |
 | `JOBS` | SYSTAT, ATTACH, PK: |
 | `QUE` | Line-printer queue and QUMRUN |
@@ -269,7 +274,7 @@ Type `HELP` or `HELP topic`. Abbreviations and CUSP names work (`HELP DISK` = `H
 | `PIP dst=src` | Copy (PIP syntax); `PIP dest<prot>=src` sets protection |
 | `PIP/DE` `/LI` `/RE` `/AP` `/NE` `/PROT:n` `/GO` `/HE` `/DI` `/WI` `/BR` | Delete, list, rename, append, no supersede, protection, continue, help; `PIP dst=a,b` concatenates |
 | `DIR/W` `/S` `/P` `/F` `/N` `/B` `/A` `/C` `/SU` `/H` | Wide, size, protection, full, no header, brief, allocation, cluster, summary, header |
-| `PLEASE` `[text]` | Message to the operator console (`KB0:`); `PLEASE/LI` lists, `PLEASE/RE` replies |
+| `PLEASE` `[text]` | Message to the operator console (`KB0:`); `PLEASE/LI` and `PLEASE/RE` (privileged or console) |
 | `KILL` / `UNSAVE` filespec | Delete |
 | `NAME old AS new` | Rename and/or set `<prot>` |
 | `ASSIGN device: logical` | Job logical name (`ASSIGN DB1: WORK`) |
@@ -283,7 +288,7 @@ Type `HELP` or `HELP topic`. Abbreviations and CUSP names work (`HELP DISK` = `H
 | `NEW [name]` | Clear memory. `NEW FOO.PAS` starts a Pascal program |
 | `OLD name` | Load `.BAS` (or `.BAC` if readable). `OLD FOO.PAS` loads Pascal |
 | `SAVE` / `REPLACE` `[name]` | Write `.BAS`, or `.PAS` if the program in memory is Pascal |
-| `COMPILE [name][<prot>]` | Compile `.BAS` to `.BAC` or `.PAS` to `.PAC` (default `<124>`) |
+| `COMPILE [name][<prot>]` | Compile `.BAS` to `.BAC` or `.PAS` to `.PAC` (default `<124>`; `<232>` is privileged) |
 | `LIST` / `LISTNH` `[n[-m]]` | List BASIC lines, or the Pascal source in memory |
 | `RUN` / `RUNNH` `[name]` | Run (`.BAC`, `.PAC`, `.BAS`, `.PAS`; a name with an extension is that file only) |
 | `CONT` | Continue after `STOP` (fails if the program was edited) |
@@ -363,14 +368,15 @@ The `0` in `ON ERROR GOTO 0` and `RESUME 0` is not a line number and is left alo
 
 | Command | |
 |---------|-|
-| `SYSTAT` / `SYS` `[job] [/switches]` | System status |
+| `SYSTAT` / `SYS` `[job] [/switches]` | System status (also at Bye, no login) |
 | `WHO` | Logged-in jobs (`SYSTAT/U`) |
+| `SWITCH [BASIC\|RSX]` | Job run-time system (RSX is MCR / `.TSK`) |
 | `SHOW …` | Aliases (V7 had no DCL SHOW; accepted here) |
 | `CPU` / `HARDWARE` | PDP-11/70 configuration |
 | `DATE` / `TIME` / `DAYTIME` | Clock |
-| `MOUNT device: packid [/PRIVATE] [/PUBLIC] [/RONLY]` | Mount a pack |
+| `MOUNT device: packid [/PRIVATE] [/PUBLIC] [/RONLY]` | Mount a pack; `/PUBLIC` (privileged) |
 | `DISMOUNT device: [packid]` | Dismount |
-| `DSKINT` / `INITIALIZE device: packid [/PUBLIC]` | (priv) Initialize a pack |
+| `DSKINT` / `INITIALIZE device: packid [/PUBLIC]` | (privileged) Initialize a pack |
 | `UMOUNT` | Reminder of MOUNT / DISMOUNT |
 
 ### Jobs
@@ -379,18 +385,18 @@ The `0` in `ON ERROR GOTO 0` and `RESUME 0` is not a line number and is left alo
 |---------|-|
 | `DETACH` | Detach this job from the keyboard |
 | `HELLO/DETACH` | Log in and detach (keyboard returns to Bye) |
-| `ATTACH n` | Attach to a detached job you own (priv: anyone's) |
-| `FORCE kb: command` | (priv) Inject a line at another job |
-| `HANGUP n` | Hang up a job (priv, or your PK: child) |
-| `BROADCAST ALL text` | (priv) Message every keyboard |
+| `ATTACH n` | Attach to a detached job you own (privileged: anyone's) |
+| `FORCE kb: command` | (privileged) Inject a line at another job |
+| `HANGUP n` | Hang up a job (privileged, or your PK: child) |
+| `BROADCAST ALL text` | (privileged) Message every keyboard |
 | `SEND` / `TALK kb: text` | Message one job |
-| `QUE [filespec]` | Line-printer queue (`QUE/LI`, `QUE/DE n`); `QUMRUN` drains to host `LP0` |
+| `QUE [filespec]` | Line-printer queue (`QUE/LI`; `QUE/DE n` of others is privileged); `QUMRUN` drains to host `LP0` |
 | `BACKUP` / `BCK` | Copy files to `MT0:` (512-byte host image); `BACKUP/RE` restores |
 | `SUBMIT filespec` | Run a command file as a detached job (`BATCH`) |
-| `QUOLST` | Disk and logged-in job quotas (`QUOLST/SET`, `REACT QUOTA`) |
-| `CCL name=filespec` | (priv) Install a keyboard command |
-| `SHUTUP` | (priv) Halt the system |
-| `UTILITY` | (priv) REACT, DSKINT, CCL, SHUTUP |
+| `QUOLST` | Disk and logged-in job quotas; `QUOLST [p,pn]`, `QUOLST/SET`, `REACT QUOTA` (privileged) |
+| `CCL` | List installed commands; `CCL name=filespec` and `CCL/DE` (privileged) |
+| `SHUTUP` | (privileged) Halt the system |
+| `UTILITY` | (privileged) REACT, DSKINT, CCL, SHUTUP |
 
 ## SYSTAT and SHOW
 
@@ -412,7 +418,7 @@ Attached switches: `SYSTAT/D` is the same as `SYSTAT /D`.
 | `/A` | All of the above |
 | `n` | One job |
 
-SHOW aliases: `JOBS`, `USERS`, `DISKS`, `MEMORY`, `TERMINALS`, `RTS`, `STATUS`, `BUSY`, `CPU`, `ACCOUNT`, `ACCOUNTS`, `DATE`, `TIME`.
+SHOW aliases: `JOBS`, `USERS`, `DISKS`, `MEMORY`, `TERMINALS`, `RTS`, `STATUS`, `BUSY`, `CPU`, `ACCOUNT`, `ACCOUNTS` (privileged), `DATE`, `TIME`.
 
 ### What the numbers mean
 
@@ -420,7 +426,7 @@ They are measured from the running system, in the units V7.2 used, rather than b
 
 **Job size** is the job's own storage in K-words (a word is two bytes): tokenised program text, scalars at one word for `%` and two for floating, arrays at their real element count, the string pool at its actual bytes, and one 512-byte buffer per open channel — a `RECORDSIZE` or `MAP` buffer at its declared size. A virtual array is charged to its file, not to the job, because that is where it lives. So `DIM A(20000)` moves a job from 2K to 40K, and `DIM #1, A(20000)` leaves it at 2K.
 
-**Run-Time** is processor time the job has actually spent executing BASIC. Sitting at `Ready`, waiting at `INPUT`, and `SLEEP` are wait states on a timesharing system and are not charged, so an idle job stays at `0:00.00` no matter how long it is logged in. `TIME(1)` returns the same figure.
+**Run-Time** is processor time the job has actually spent executing BASIC. Sitting at `Ready`, waiting at `INPUT`, and `SLEEP` are wait states on a timesharing system and are not charged, so an idle job stays at `0:00.00` no matter how long it is logged in. `TIME(1)` is that time in tenths of a second; `TIME(3)` is kilo-core-ticks (`TIME(1)` times the job size in K-words).
 
 **Memory** (`SYSTAT/M`) balances: Monitor and the BASIC-PLUS RTS are resident, User is the sum of the live job sizes, and Free is the rest of the 1920K. The RTS is reentrant, so its 16K is counted **once** however many jobs are running BASIC — each job pays only for its own data. That is how RSTS worked, and it is why ten users cost far less than ten times one user.
 
@@ -478,7 +484,7 @@ DISMOUNT DB1:
 SYSTAT/D
 ```
 
-`/PUBLIC` requires privilege. Ordinary users mount private packs. `SY0:` / `DB0:` cannot be dismounted. Pack IDs are 1–6 letters or digits; once mounted, `PAYROL:` is a logical name for that unit.
+`/PUBLIC` (privileged) adds the pack to the public structure. Ordinary users mount private packs. `SY0:` / `DB0:` cannot be dismounted. Pack IDs are 1–6 letters or digits; once mounted, `PAYROL:` is a logical name for that unit.
 
 Host layout: `disk/SY/<proj>,<prog>/` for the system pack, plus `disk/DB1`, `disk/DL0`, … Pack state is `disk/packs.json`. The `disk/` tree is runtime (not source).
 
@@ -524,7 +530,7 @@ String arithmetic is exact to any length, which is how money was kept before any
 
 `SYS(CHR$(n)+…)`: 1=system name, 2=PPN, 3=job, 4=program, 5=date, 6=FIP (0/-21 binary PPN, 1=name, 2=job, 3=KB, 5=date, 6=pack ID, 9=ident, -1 hangup, -3=UU.TB1, -5 assign, -6 deassign, -12=UU.TB2, -10=UU.TRM, -14 disable logins, -16 send, -17 lookup, -7=Ctrl-C trap; other subcodes return zeros), 7=time, 9=pack SY.
 
-`CHAIN filespec [LINE n]` loads and runs another program. `COMMON A, B$(n)` is a positional block that survives `CHAIN`. `SLEEP n` waits n seconds (Ctrl-C aborts). `WAIT n` sets the keyboard timeout for the next `INPUT` (error 15). `CONT` at Ready resumes after `STOP` unless the program was edited. `SYS(CHR$(6%)+CHR$(-7%)+CHR$(1%))` lets `ON ERROR` catch Ctrl-C as error 28.
+`CHAIN filespec [LINE n]` loads and runs another program. `COMMON A, B$(n)` is a positional block that survives `CHAIN`. `SLEEP n` waits n seconds (Ctrl-C aborts). `WAIT n` sets the timeout for the next `INPUT` or `GET` of a keyboard/PK (error 15). `WAIT 0` polls. `CONT` at Ready resumes after `STOP` unless the program was edited. `SYS(CHR$(6%)+CHR$(-7%)+CHR$(1%))` lets `ON ERROR` catch Ctrl-C as error 28.
 
 `OPEN` accepts `MODE n`, `CLUSTERSIZE n` and `FILESIZE n` as well as `RECORDSIZE`. `FILESIZE` allocates that many 512-byte blocks; `CLUSTERSIZE` is what DIR and pack usage count. `MODE` bits: 1 update, 2 append, 8 wait if in use, 16 exclusive locked-open, 32 contiguous, 64 tentative, 128 no supersede (error 16), 256 read regardless of protection. `GET` of a shared record interlocks the block until `UNLOCK`, the next `GET`/`PUT`, or `CLOSE` (error 19 if another job holds it). Sequential `INPUT #` of a shared disk file interlocks the same way. `RESTORE n` rereads `DATA` starting at that line.
 
@@ -540,9 +546,9 @@ Virtual arrays: `OPEN "FILE.DAT" AS FILE 1` then `DIM #1, A%(100)` or `DIM #1, A
 
 After `HELLO`, `[1,2]NOTICE.TXT` is typed, then `LOGIN.BAS` or `START.BAS` in the account is `RUN` if present.
 
-Character devices open like files: `OPEN "KB:" AS FILE 1` is your own terminal and `KB3:` is another one (privileged, like `FORCE`), `LP:` is the line printer, spooled to `LPn.LST` in your account and entered in `QUE` on `CLOSE` (QUMRUN copies it to host `LP0`), and `NL:` is the null device, which swallows output and is at end of file at once. `MT:` is a magtape image (`disk/MT0`, 512-byte records; `BACKUP` / `BACKUP/RE`). `PP:`/`PR:` are paper tape, `CR:` a card reader, `DX:`/`DT:` floppy and DECtape images. `SPEC%(ch,fn)` rewinds and skips magtape.
+Character devices open like files: `OPEN "KB:" AS FILE 1` is your own terminal. `OPEN "KB3:"` takes a keyboard that is at Bye — any user, I/O on that channel until `CLOSE`, login waits. A logged-in `KBn:` needs privilege. `LP:` is the line printer, spooled to `LPn.LST` in your account and entered in `QUE` on `CLOSE` (QUMRUN copies it to host `LP0`), and `NL:` is the null device, which swallows output and is at end of file at once. `MT:` is a magtape image (`disk/MT0`, 512-byte records; `BACKUP` / `BACKUP/RE`). `PP:`/`PR:` are paper tape, `CR:` a card reader, `DX:`/`DT:` floppy and DECtape images. `SPEC%(ch,fn)` rewinds and skips magtape.
 
-`OPEN "PK:" AS FILE n` assigns a pseudo keyboard and forks a job. `PRINT #n` sends keystrokes; `INPUT #n` / `LINE INPUT #n` reads output; `CLOSE #n` hangs up the child. Demo: `OLD PK` then `RUN` on GUEST.
+`OPEN "PK:" AS FILE n` assigns a pseudo keyboard and forks a job. `PRINT #n` sends keystrokes; `INPUT #n` / `LINE INPUT #n` reads output; `GET #n` / `PUT #n` with `RECORDSIZE 1` are one character; `CLOSE #n` hangs up the child. Demo: `OLD PK` then `RUN`, or `OLD MITM` for a character relay.
 
 ## Pascal
 
@@ -557,7 +563,7 @@ COMPILE               write HELLO.PAC from memory
 RUN                   run the program in memory
 COMPILE HELLO.PAS     compile HELLO.PAS to HELLO.PAC
 COMPILE FACT          FACT.PAS (no FACT.BAS) to FACT.PAC
-COMPILE FACT<232>     same, privileged (SYSTEM)
+COMPILE FACT<232>     (privileged)
 RUN FACT.PAS          compile-and-go (with the RUN header)
 RUN FACT.PAC          run compiled Pascal
 RUN FACT              .BAC, then .PAC, then .BAS, then .PAS
@@ -584,7 +590,7 @@ On a real V7.2 system, `COMPILE` wrote BASIC-PLUS P-code into a `.BAC`. Here `CO
 
 When extending BASIC, add an opcode in `pcode.go`, emission in `pcode_compile.go`, and a VM case in `pcode_vm.go`.
 
-Privileged CUSP demo (from GUEST): `RUN $WHOAMI`.
+Privileged compiled-program demo (from GUEST): `RUN [1,9]WHOAMI`.
 
 ## Jobs and Telnet
 
@@ -608,15 +614,16 @@ CUSPs often `PEEK` monitor words: date at 512, minutes to midnight at 514, job n
 
 ## Sample programs
 
-Seeded onto a new disk:
+Seeded onto a new disk from files in the tree (rebuild after you edit them):
 
-| Account | Files |
-|---------|--------|
-| `[1,2]` | `NOTICE.TXT`, `LOGIN.TXT`, `WHOAMI.BAS` / `WHOAMI.BAC<232>`, `DATA.BAS`, `COMP.BAS` |
-| `[100,100]` | `HELLO`, `GUESS`, `NIM`, `HANGMN`, `TICTAC`, `LANDER`, `WUMPUS`, `BLACKJ`, `SLOTS`, `ACEY`, `FIB`, `STARS`, `TABLE`, `NOTE`, `WHILE`, `UNTIL`, `CHANGE`, `USING`, `ERRDEMO`, `MODS`, `CPU`, `PK`, `README.TXT` |
-| `[200,200]` | `HELLO`, `SIEVE` |
+| Account | Source | Files |
+|---------|--------|--------|
+| `[1,2]` | `cusps/`, `samples/1,2/` | library CUSPs; `NOTICE.TXT`, `LOGIN.TXT` |
+| `[1,9]` | `demos/` | `LOGIN.TXT`, `WHOAMI.BAS` / `WHOAMI.BAC<232>`, `DATA.BAS`, `COMP.BAS` |
+| `[100,100]` | `samples/100,100/` | `HELLO`, games, `PK`, `MITM`, language samples, `README.TXT` |
+| `[200,200]` | `samples/200,200/` | `HELLO`, `SIEVE` |
 
-`COMP.BAS` is the self-checking exerciser: it covers every statement, modifier, and function this system implements, prints `FAIL n` for any check that does not hold, and ends with `ALL PASSED: n`. It lives on `[1,2]` only, because its last test `CHAIN`s back to itself at line 8000 with `COMMON` carrying the totals, then `KILL`s its scratch files. Log in as SYSTEM and type `RUN COMP`. (`CONT` is a keyboard command, so it cannot be exercised from inside a program.)
+`COMP.BAS` is the self-checking exerciser: it covers every statement, modifier, and function this system implements, prints `FAIL n` for any check that does not hold, and ends with `ALL PASSED: n`. It lives on `[1,9]` only, because its last test `CHAIN`s back to itself at line 8000 with `COMMON` carrying the totals, then `KILL`s its scratch files. Log in as LIBRARY and type `RUN COMP`. (`CONT` is a keyboard command, so it cannot be exercised from inside a program.)
 
 ## Design
 
@@ -641,7 +648,7 @@ Not a CPU emulator: the host is a timesharing **user environment**. BASIC is par
 | Pseudo keyboards | `pk.go` |
 | Print queue, CCL | `queue.go`, `ccl.go` |
 | Config | `config.go`, `config.toml` |
-| Seeded programs, seed manifest | `samples.go`, `seeds.go` |
+| Seeded programs, seed manifest | `cusps/`, `demos/`, `samples/`, `samples.go`, `seeds.go` |
 | Entry | `cmd/rsts/main.go` |
 
 ## Testing
@@ -650,7 +657,7 @@ Not a CPU emulator: the host is a timesharing **user environment**. BASIC is par
 go test ./...
 ```
 
-That is the language and CLI suite (`*_test.go` in this directory). `COMP.BAS` on `[1,2]` is the in-system check: log in and `RUN COMP`. Serial lines have an extra Unix PTY test; the Windows COM path is compiled and vetted but not run against hardware.
+That is the language and CLI suite (`*_test.go` in this directory). `COMP.BAS` on `[1,9]` is the in-system check: log in as LIBRARY and `RUN COMP`. Serial lines have an extra Unix PTY test; the Windows COM path is compiled and vetted but not run against hardware.
 
 Changes are recorded in [CHANGELOG.txt](CHANGELOG.txt).
 

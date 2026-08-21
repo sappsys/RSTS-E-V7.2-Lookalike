@@ -57,7 +57,7 @@ var keywords = map[string]bool{
 	"MAT": true, "MAP": true, "ORGANIZATION": true, "VIRTUAL": true,
 	"FNEND": true, "FNEXIT": true,
 	"EXTEND": true, "NOEXTEND": true, "COMMON": true, "WAIT": true, "UNLOCK": true,
-	"SCALE": true,
+	"SCALE": true, "XOR": true, "EQV": true, "IMP": true,
 }
 
 var statementStarters = map[string]bool{
@@ -78,7 +78,7 @@ var builtins = map[string]bool{
 	"ABS": true, "INT": true, "SGN": true, "SQR": true, "SIN": true, "COS": true,
 	"TAN": true, "ATN": true, "LOG": true, "EXP": true, "RND": true, "LEN": true,
 	"LEFT$": true, "RIGHT$": true, "MID$": true, "INSTR": true, "CHR$": true,
-	"ASC": true, "STR$": true, "VAL": true, "TAB": true, "SPC": true, "DATE$": true,
+	"ASC": true, "ASCII": true, "STR$": true, "VAL": true, "TAB": true, "SPC": true, "DATE$": true,
 	"TIME$": true, "SPACE$": true, "STRING$": true, "POS": true, "FIX": true,
 	"LOG10": true, "PI": true, "SYS": true, "ERR": true, "ERL": true,
 	"CVT%$": true, "CVT$%": true, "CVTF$": true, "CVT$F": true, "CVT$$": true,
@@ -137,6 +137,19 @@ func (t *tokenizer) run() ([]token, error) {
 			t.i++
 			continue
 		}
+		if ch == '&' {
+			t.i++
+			for t.i < n && (t.text[t.i] == ' ' || t.text[t.i] == '\t') {
+				t.i++
+			}
+			if t.i < n && t.text[t.i] == '\r' {
+				t.i++
+			}
+			if t.i < n && t.text[t.i] == '\n' {
+				t.i++
+			}
+			continue
+		}
 		if ch == '\n' {
 			tokens = append(tokens, token{kind: tokEOL, text: "\n", pos: t.i})
 			t.i++
@@ -148,7 +161,7 @@ func (t *tokenizer) run() ([]token, error) {
 			}
 			continue
 		}
-		if ch == '"' {
+		if ch == '"' || ch == '\'' {
 			tok, err := t.readString()
 			if err != nil {
 				return nil, err
@@ -172,10 +185,10 @@ func (t *tokenizer) run() ([]token, error) {
 		if t.i+1 < n {
 			two := t.text[t.i : t.i+2]
 			switch two {
-			case "<>", "<=", ">=", "==":
+			case "<>", "<=", ">=", "==", "**":
 				op := two
-				if two == "==" {
-					op = "<>"
+				if two == "**" {
+					op = "^"
 				}
 				tokens = append(tokens, token{kind: tokOp, text: op, pos: pos})
 				t.i += 2
@@ -217,14 +230,15 @@ func (t *tokenizer) run() ([]token, error) {
 
 func (t *tokenizer) readString() (token, error) {
 	pos := t.i
+	quote := t.text[t.i]
 	t.i++
 	var b strings.Builder
 	n := len(t.text)
 	for t.i < n {
 		ch := t.text[t.i]
-		if ch == '"' {
-			if t.i+1 < n && t.text[t.i+1] == '"' {
-				b.WriteByte('"')
+		if ch == quote {
+			if t.i+1 < n && t.text[t.i+1] == quote {
+				b.WriteByte(quote)
 				t.i += 2
 				continue
 			}

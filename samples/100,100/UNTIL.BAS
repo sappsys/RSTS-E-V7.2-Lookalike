@@ -1,0 +1,6 @@
+10 I = 1
+20 UNTIL I > 4
+30 PRINT I
+40 I = I+1
+50 NEXT
+60 END

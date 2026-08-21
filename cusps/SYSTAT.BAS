@@ -1,0 +1,208 @@
+10 EXTEND
+20 DIM SW$(20), SV$(20)
+30 C$=SYS(CHR$(6%)+CHR$(-18%))
+40 GOSUB 8000
+50 FF%=0% \ NN%=0% \ UU%=0% \ FJ%=0% \ FD%=0% \ FK%=0% \ FM%=0% \ FR%=0% \ FS%=0% \ FB%=0% \ FH%=0% \ ANY%=0%
+60 FOR J%=1% TO NS%
+70 CH$=LEFT$(SW$(J%),1)
+80 IF CH$="F" THEN FF%=-1%
+90 IF CH$="N" THEN NN%=-1%
+100 IF CH$="U" OR CH$="W" OR CH$="L" THEN UU%=-1%
+110 IF CH$="J" THEN FJ%=-1% \ ANY%=-1%
+120 IF CH$="D" THEN FD%=-1% \ ANY%=-1%
+130 IF CH$="K" OR CH$="T" THEN FK%=-1% \ ANY%=-1%
+140 IF CH$="M" THEN FM%=-1% \ ANY%=-1%
+150 IF CH$="R" THEN FR%=-1% \ ANY%=-1%
+160 IF CH$="S" THEN FS%=-1% \ ANY%=-1%
+170 IF CH$="B" THEN FB%=-1% \ ANY%=-1%
+180 IF CH$="H" THEN FH%=-1% \ ANY%=-1%
+190 IF CH$="A" THEN FJ%=-1% \ FD%=-1% \ FK%=-1% \ FM%=-1% \ FR%=-1% \ FS%=-1% \ FB%=-1% \ FH%=-1% \ ANY%=-1%
+200 NEXT J%
+210 IF ANY%=0% THEN FJ%=-1%
+215 JB$="" \ PK$="" \ M$=""
+216 IF FJ% OR FK% OR FR% OR FB% OR FM% THEN JB$=SYS(CHR$(6%)+CHR$(-22%))
+217 IF FD% OR FB% THEN PK$=SYS(CHR$(6%)+CHR$(-23%))
+218 IF FM% OR FS% OR FH% THEN M$=SYS(CHR$(6%)+CHR$(-35%))
+220 IF NN%=0% THEN PRINT "Status of "; SYS(CHR$(1%)); "  at  "; DATE$; "  "; TIME$ \ PRINT
+230 IF FJ% THEN D$=JB$ \ GOSUB 1000
+240 IF FD% THEN D$=PK$ \ GOSUB 2000
+250 IF FB% THEN D$=JB$ \ GOSUB 2500
+260 IF FK% THEN D$=JB$ \ GOSUB 3000
+270 IF FR% THEN D$=JB$ \ GOSUB 3500
+280 IF FM% THEN R$=M$ \ GOSUB 4000
+290 IF FS% THEN R$=M$ \ GOSUB 4500
+300 IF FH% THEN R$=M$ \ GOSUB 5000
+310 END
+1000 IF FF% THEN PRINT "Job    Who       Where  What      Size  State   Run-Time   RTS" ELSE PRINT "Job    Who       Where  What      Size  State   Run-Time"
+1010 DP%=1%
+1020 GOSUB 9300
+1030 IF Z%=0% THEN PRINT \ RETURN
+1040 N%=1% \ GOSUB 9000 \ JB%=VAL(F$)
+1050 IF ARG$<>"" THEN IF NUM1$(JB%)<>ARG$ AND F$<>ARG$ THEN 1020
+1060 N%=2% \ GOSUB 9000 \ WHO$=F$
+1070 IF UU% THEN IF WHO$="*****" OR WHO$="" THEN 1020
+1080 GOSUB 1100
+1090 GOTO 1020
+1100 N%=3% \ GOSUB 9000 \ WH$=F$
+1110 N%=4% \ GOSUB 9000 \ WT$=F$
+1120 N%=5% \ GOSUB 9000 \ SZ%=VAL(F$)
+1130 N%=6% \ GOSUB 9000 \ ST$=F$
+1140 N%=7% \ GOSUB 9000 \ CP$=F$
+1150 N%=8% \ GOSUB 9000 \ RT$=F$
+1160 N%=JB% \ W%=3% \ GOSUB 9200 \ PRINT P$; "  ";
+1170 F$=WHO$ \ W%=9% \ GOSUB 9100 \ PRINT P$; " ";
+1180 F$=WH$ \ W%=6% \ GOSUB 9100 \ PRINT P$; " ";
+1190 F$=WT$ \ W%=9% \ GOSUB 9100 \ PRINT P$; " ";
+1200 N%=SZ% \ W%=3% \ GOSUB 9200 \ PRINT P$; "K  ";
+1210 F$=ST$ \ W%=5% \ GOSUB 9100 \ PRINT P$; "  ";
+1220 F$=CP$ \ W%=8% \ GOSUB 9250 \ PRINT P$;
+1230 IF FF% THEN PRINT "  "; RT$ ELSE PRINT
+1240 RETURN
+2000 PRINT "Disk    Pack    Open   Size    Free   Clu  Name    Comments"
+2010 DP%=1%
+2020 GOSUB 9300
+2030 IF Z%=0% THEN PRINT \ RETURN
+2040 N%=1% \ GOSUB 9000 \ W%=6% \ GOSUB 9100 \ PRINT P$; "  ";
+2050 N%=2% \ GOSUB 9000 \ W%=6% \ GOSUB 9100 \ PRINT P$; " ";
+2060 N%=3% \ GOSUB 9000 \ N%=VAL(F$) \ W%=4% \ GOSUB 9200 \ PRINT P$; "  ";
+2070 N%=4% \ GOSUB 9000 \ N%=VAL(F$) \ W%=6% \ GOSUB 9200 \ PRINT P$; "  ";
+2080 N%=5% \ GOSUB 9000 \ N%=VAL(F$) \ W%=6% \ GOSUB 9200 \ PRINT P$; "  ";
+2090 N%=6% \ GOSUB 9000 \ N%=VAL(F$) \ W%=3% \ GOSUB 9200 \ PRINT P$; "  ";
+2100 N%=7% \ GOSUB 9000 \ W%=6% \ GOSUB 9100 \ PRINT P$; "  ";
+2110 N%=8% \ GOSUB 9000 \ PRINT F$
+2120 GOTO 2020
+2500 PRINT "Busy devices:"
+2510 BZ%=0% \ DP%=1%
+2520 GOSUB 9300
+2530 IF Z%=0% THEN 2580
+2540 N%=6% \ GOSUB 9000
+2550 IF F$<>"Det" THEN N%=3% \ GOSUB 9000 \ W%=6% \ GOSUB 9100 \ KB$=P$ \ N%=1% \ GOSUB 9000 \ JB$=F$ \ N%=4% \ GOSUB 9000 \ PRINT "  "; KB$; "  Job "; JB$; "  "; F$ \ BZ%=-1%
+2560 GOTO 2520
+2580 D$=PK$ \ DP%=1%
+2590 GOSUB 9300
+2600 IF Z%=0% THEN 2640
+2610 N%=9% \ GOSUB 9000
+2615 IF VAL(F$)=0 THEN 2630
+2620 N%=1% \ GOSUB 9000 \ W%=6% \ GOSUB 9100 \ DV$=P$ \ N%=7% \ GOSUB 9000 \ PRINT "  "; DV$; "  "; F$ \ BZ%=-1%
+2630 GOTO 2590
+2640 IF BZ%=0% THEN PRINT "  None"
+2650 PRINT \ RETURN
+3000 PRINT "Keyboards:"
+3010 PRINT "KB     Job   Who       What      State"
+3020 DP%=1%
+3030 GOSUB 9300
+3040 IF Z%=0% THEN PRINT \ RETURN
+3050 N%=6% \ GOSUB 9000 \ IF F$="Det" THEN 3030
+3060 N%=3% \ GOSUB 9000 \ W%=6% \ GOSUB 9100 \ PRINT P$; " ";
+3070 N%=1% \ GOSUB 9000 \ N%=VAL(F$) \ W%=3% \ GOSUB 9200 \ PRINT P$; "  ";
+3080 N%=2% \ GOSUB 9000 \ W%=9% \ GOSUB 9100 \ PRINT P$; " ";
+3082 N%=4% \ GOSUB 9000 \ W%=9% \ GOSUB 9100 \ PRINT P$; " ";
+3084 N%=6% \ GOSUB 9000 \ PRINT F$
+3090 GOTO 3030
+3500 PRINT "Run-Time Systems:"
+3510 PRINT " Name   Ext       Size  Users   Comments"
+3520 NB%=0% \ NR%=0% \ DP%=1%
+3530 GOSUB 9300
+3540 IF Z%=0% THEN 3580
+3550 N%=8% \ GOSUB 9000
+3560 IF F$="RSX" THEN NR%=NR%+1% ELSE NB%=NB%+1%
+3570 GOTO 3530
+3580 N%=NB% \ W%=3% \ GOSUB 9200 \ PRINT " BASIC   BAC     16K    "; P$; "    Perm, KBM, CSZ"
+3590 N%=NR% \ W%=3% \ GOSUB 9200 \ PRINT " RSX     TSK      3K    "; P$; "    Non-Res, KBM"
+3600 PRINT \ RETURN
+4000 PRINT "Memory:"
+4010 N%=1% \ GOSUB 9000 \ N%=VAL(F$) \ W%=5% \ GOSUB 9200 \ PRINT "  Monitor   "; P$; "K  resident"
+4020 N%=2% \ GOSUB 9000 \ N%=VAL(F$) \ W%=5% \ GOSUB 9200 \ T$=P$ \ N%=5% \ GOSUB 9000 \ PRINT "  BASIC     "; T$; "K  RTS, reentrant, shared by "; F$; " job";
+4030 IF VAL(F$)<>1 THEN PRINT "s" ELSE PRINT
+4040 N%=3% \ GOSUB 9000 \ N%=VAL(F$) \ W%=5% \ GOSUB 9200 \ T$=P$ \ N%=5% \ GOSUB 9000 \ PRINT "  User      "; T$; "K  "; F$; " job";
+4050 IF VAL(F$)<>1 THEN PRINT "s" ELSE PRINT
+4060 N%=4% \ GOSUB 9000 \ N%=VAL(F$) \ W%=5% \ GOSUB 9200 \ PRINT "  Free      "; P$; "K"
+4070 N%=2% \ W%=5% \ GOSUB 9200 \ PRINT "  Cache     "; P$; "K  bipolar"
+4080 N%=15% \ GOSUB 9000 \ N%=VAL(F$) \ W%=5% \ GOSUB 9200 \ PRINT "  Total     "; P$; "K  usable (2048 KW 22-bit space)"
+4090 PRINT
+4100 PRINT "Job    Who       What      Size"
+4110 D$=JB$ \ DP%=1%
+4120 GOSUB 9300
+4130 IF Z%=0% THEN PRINT \ RETURN
+4140 N%=1% \ GOSUB 9000 \ N%=VAL(F$) \ W%=3% \ GOSUB 9200 \ PRINT P$; "  ";
+4150 N%=2% \ GOSUB 9000 \ W%=9% \ GOSUB 9100 \ PRINT P$; " ";
+4160 N%=4% \ GOSUB 9000 \ W%=9% \ GOSUB 9100 \ PRINT P$; " ";
+4170 N%=5% \ GOSUB 9000 \ N%=VAL(F$) \ W%=4% \ GOSUB 9200 \ PRINT P$; "K"
+4180 GOTO 4120
+4500 PRINT "Statistics:"
+4510 N%=5% \ GOSUB 9000 \ J$=F$ \ N%=6% \ GOSUB 9000 \ L$=F$ \ N%=12% \ GOSUB 9000
+4520 PRINT "  Jobs      "; J$; "  ("; L$; " logged in, "; F$; " configured)"
+4530 N%=7% \ GOSUB 9000 \ PRINT "  Up        "; F$
+4540 N%=13% \ GOSUB 9000 \ C$=F$ \ N%=14% \ GOSUB 9000 \ H$=F$ \ N%=8% \ GOSUB 9000
+4550 PRINT "  CPU       "; C$; "  "; H$; " Hz  "; F$; " used"
+4560 N%=15% \ GOSUB 9000 \ T$=F$ \ N%=3% \ GOSUB 9000 \ U$=F$ \ N%=4% \ GOSUB 9000
+4570 PRINT "  Memory    "; T$; " K-words  ("; U$; "K user, "; F$; "K free)"
+4580 N%=9% \ GOSUB 9000 \ PRINT "  Files     "; F$; " open"
+4590 N%=10% \ GOSUB 9000 \ T$=F$ \ N%=11% \ GOSUB 9000
+4600 PRINT "  Disk      "; T$; " blocks, "; F$; " free (mounted)"
+4610 PRINT \ RETURN
+5000 PRINT "CPU      PDP-11/70  (22-bit addressing)"
+5010 N%=15% \ GOSUB 9000 \ PRINT "Memory   "; F$; " K-words usable  (2048 KW 22-bit space)"
+5020 PRINT "Cache    2K-byte bipolar"
+5030 PRINT "FPP      FP11-C"
+5040 N%=14% \ GOSUB 9000 \ PRINT "Clock    KW11-L  "; F$; " Hz"
+5050 PRINT "Buses    MASSBUS RH70, UNIBUS"
+5060 PRINT "Disk     SY0:/DB0: RP06 (SYSDSK)  DB1: RP06  DL0:/DL1: RL02  DM0: RK07"
+5070 PRINT "Console  "; SYS(CHR$(6%)+CHR$(3%)); " DL11"
+5080 N%=12% \ GOSUB 9000 \ PRINT "Jobs     "; F$; " configured (V7.2 allows 63)"
+5090 RETURN
+8000 ARG$="" \ NS%=0% \ I%=1%
+8010 IF I%>LEN(C$) THEN GOSUB 8520 \ RETURN
+8020 CH$=MID$(C$,I%,1)
+8030 IF CH$="/" THEN 8100
+8040 ARG$=ARG$+CH$ \ I%=I%+1% \ GOTO 8010
+8100 I%=I%+1% \ NM$="" \ VL$=""
+8110 IF I%>LEN(C$) THEN 8190
+8120 CH$=MID$(C$,I%,1)
+8130 IF CH$="/" OR CH$=" " OR CH$=CHR$(9) OR CH$="=" OR CH$=":" THEN 8140
+8135 NM$=NM$+CH$ \ I%=I%+1% \ GOTO 8110
+8140 IF CH$<>":" AND CH$<>"=" THEN 8190
+8150 I%=I%+1%
+8160 IF I%>LEN(C$) THEN 8190
+8170 CH$=MID$(C$,I%,1)
+8180 IF CH$="/" OR CH$=" " OR CH$=CHR$(9) THEN 8190
+8185 VL$=VL$+CH$ \ I%=I%+1% \ GOTO 8160
+8190 IF NM$="" THEN 8010
+8192 GOSUB 8400
+8195 NS%=NS%+1% \ SW$(NS%)=NM$ \ SV$(NS%)=VL$ \ GOTO 8010
+8400 FOR J%=1% TO LEN(NM$)
+8410 A%=ASC(MID$(NM$,J%,1))
+8420 IF A%>=97 AND A%<=122 THEN MID$(NM$,J%,1)=CHR$(A%-32)
+8430 NEXT J%
+8440 RETURN
+8520 IF ARG$="" THEN RETURN
+8530 IF LEFT$(ARG$,1)=" " THEN ARG$=RIGHT$(ARG$,2) \ GOTO 8520
+8540 IF MID$(ARG$,LEN(ARG$),1)=" " THEN ARG$=LEFT$(ARG$,LEN(ARG$)-1) \ GOTO 8520
+8550 RETURN
+9000 F$="" \ P%=1% \ C%=0% \ S$=R$+"|"
+9010 Q%=INSTR(P%,S$,"|")
+9020 IF Q%=0 THEN RETURN
+9030 C%=C%+1%
+9040 IF C%<>N% THEN P%=Q%+1% \ GOTO 9010
+9050 F$=MID$(S$,P%,Q%-P%)
+9060 RETURN
+9100 P$=LEFT$(F$+SPACE$(W%),W%)
+9110 RETURN
+9200 P$=NUM1$(N%)
+9210 IF LEN(P$)>=W% THEN RETURN
+9220 P$=SPACE$(W%-LEN(P$))+P$
+9230 RETURN
+9250 P$=F$
+9252 IF LEN(P$)>=W% THEN RETURN
+9254 P$=SPACE$(W%-LEN(P$))+P$
+9256 RETURN
+9300 Z%=0%
+9310 IF D$="" THEN RETURN
+9320 IF DP%>LEN(D$) THEN RETURN
+9330 Q%=INSTR(DP%,D$+CHR$(10),CHR$(10))
+9340 IF Q%=0 THEN RETURN
+9350 R$=MID$(D$,DP%,Q%-DP%)
+9360 DP%=Q%+1%
+9370 IF R$="" THEN 9320
+9380 Z%=-1%
+9390 RETURN

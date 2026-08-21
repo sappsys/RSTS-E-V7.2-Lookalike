@@ -131,6 +131,10 @@ func (sys *System) registerShell(s *Shell) {
 }
 
 func (sys *System) unregisterShell(s *Shell) {
+	if s == nil {
+		return
+	}
+	sys.releaseKBForJob(s.Job)
 	sys.mu.Lock()
 	defer sys.mu.Unlock()
 	if sys.shells[s.Job] == s {
@@ -435,7 +439,11 @@ func (s *Shell) printSystatJobs(want string, full, loggedOnly bool) {
 			j.Num, clip(who, 9), clip(j.where(), 6), clip(j.What, 9),
 			j.sizeK(), j.state(), j.cpu())
 		if full {
-			line += "  BASIC"
+			rts := j.RTS
+			if rts == "" {
+				rts = "BASIC"
+			}
+			line += "  " + rts
 		}
 		fmt.Fprintln(s.out, line)
 	}
@@ -499,15 +507,24 @@ func (s *Shell) printSystatMemory() {
 }
 
 func (s *Shell) printSystatRTS() {
-	njobs := 1
+	basicN, rsxN := 0, 0
 	if s.sys != nil {
-		njobs = len(s.sys.JobList())
+		for _, j := range s.sys.JobList() {
+			if strings.EqualFold(j.RTS, "RSX") {
+				rsxN++
+			} else {
+				basicN++
+			}
+		}
+	} else if s.jobRTS() == "RSX" {
+		rsxN = 1
+	} else {
+		basicN = 1
 	}
 	fmt.Fprintln(s.out, "Run-Time Systems:")
 	fmt.Fprintln(s.out, " Name   Ext       Size  Users   Comments")
-	fmt.Fprintf(s.out, " BASIC   BAC     16K    %3d    Perm, KBM, CSZ\n", njobs)
-	fmt.Fprintln(s.out, " RT11    SAV      4K      0    Non-Res, KBM, CSZ")
-	fmt.Fprintln(s.out, " RSX     TSK      3K      0    Non-Res, KBM")
+	fmt.Fprintf(s.out, " BASIC   BAC     16K    %3d    Perm, KBM, CSZ\n", basicN)
+	fmt.Fprintf(s.out, " RSX     TSK      3K    %3d    Non-Res, KBM\n", rsxN)
 	fmt.Fprintln(s.out)
 }
 

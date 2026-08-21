@@ -5,6 +5,7 @@ import (
 	"net"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 )
@@ -237,4 +238,288 @@ done:
 	case <-time.After(3 * time.Second):
 		t.Fatal("PK.BAS timed out")
 	}
+}
+
+func scoopConn(c net.Conn, b *strings.Builder, mu *sync.Mutex, stop <-chan struct{}) {
+	buf := make([]byte, 4096)
+	for {
+		select {
+		case <-stop:
+			return
+		default:
+		}
+		_ = c.SetReadDeadline(time.Now().Add(50 * time.Millisecond))
+		n, err := c.Read(buf)
+		if n > 0 {
+			mu.Lock()
+			b.Write(buf[:n])
+			mu.Unlock()
+		}
+		if err != nil && !isTimeout(err) {
+			return
+		}
+	}
+}
+
+func builderHas(mu *sync.Mutex, b *strings.Builder, want string) bool {
+	mu.Lock()
+	defer mu.Unlock()
+	return strings.Contains(b.String(), want)
+}
+
+func builderStr(mu *sync.Mutex, b *strings.Builder) string {
+	mu.Lock()
+	defer mu.Unlock()
+	return b.String()
+}
+
+func waitBuilder(mu *sync.Mutex, b *strings.Builder, want string, d time.Duration) bool {
+	deadline := time.Now().Add(d)
+	for time.Now().Before(deadline) {
+		if builderHas(mu, b, want) {
+			return true
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	return false
+}
+
+func telnetCollect(c net.Conn, d time.Duration) string {
+	_ = c.SetReadDeadline(time.Now().Add(d))
+	var got strings.Builder
+	buf := make([]byte, 4096)
+	for {
+		n, err := c.Read(buf)
+		if n > 0 {
+			got.Write(buf[:n])
+		}
+		if err != nil {
+			return got.String()
+		}
+	}
+}
+
+func telnetWait(c net.Conn, want string, d time.Duration) string {
+	deadline := time.Now().Add(d)
+	var got strings.Builder
+	buf := make([]byte, 4096)
+	for time.Now().Before(deadline) {
+		_ = c.SetReadDeadline(time.Now().Add(100 * time.Millisecond))
+		n, err := c.Read(buf)
+		if n > 0 {
+			got.Write(buf[:n])
+			if strings.Contains(got.String(), want) {
+				return got.String()
+			}
+		}
+		if err != nil && !isTimeout(err) {
+			return got.String()
+		}
+	}
+	return got.String()
+}
+
+func TestTelnetStolenGet(t *testing.T) {
+	cfg := Config{MaxUsers: 6, Telnet: true, TelnetPort: 0, TelnetBind: "127.0.0.1", Console: false}
+	sys, err := NewSystem(t.TempDir(), cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer waitJobs(sys, 0)
+	defer sys.Close()
+	addr, err := sys.StartTelnet()
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	kb0, err := net.DialTimeout("tcp", addr, 2*time.Second)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer kb0.Close()
+	kb0out := telnetWait(kb0, "Bye", 2*time.Second)
+	if !strings.Contains(kb0out, "Bye") {
+		t.Fatalf("KB0 never reached Bye: %q", kb0out)
+	}
+
+	kb1, err := net.DialTimeout("tcp", addr, 2*time.Second)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer kb1.Close()
+	_, _ = kb1.Write([]byte("HELLO GUEST\r\nGUEST\r\n"))
+	kb1out := telnetWait(kb1, "Ready", 3*time.Second)
+	if !strings.Contains(kb1out, "Ready") {
+		t.Fatalf("KB1 did not log in: %q", kb1out)
+	}
+
+	src := `10 ON ERROR GOTO 100
+20 OPEN "KB0:" AS FILE 1, RECORDSIZE 1
+30 FIELD #1, 1 AS A$
+40 WAIT 0
+50 FOR I=1 TO 20
+52 LSET A$="X"
+54 PUT #1
+56 NEXT I
+60 GET #1
+70 PRINT "GOT";ASC(A$)
+80 GOTO 120
+100 IF ERR=15 THEN SLEEP .05 \ RESUME 60
+110 PRINT "ERR";ERR;" AT ";ERL
+120 CLOSE 1
+130 END
+`
+	// Type the program on KB1.
+	for _, line := range strings.Split(strings.TrimRight(src, "\n"), "\n") {
+		_, _ = kb1.Write([]byte(line + "\r\n"))
+		time.Sleep(20 * time.Millisecond)
+	}
+	_, _ = kb1.Write([]byte("RUN\r\n"))
+	time.Sleep(300 * time.Millisecond)
+	_, _ = kb0.Write([]byte("Q"))
+	kb1out += telnetWait(kb1, "GOT", 3*time.Second)
+	if !strings.Contains(kb1out, "GOT") {
+		kb0out += telnetCollect(kb0, 200*time.Millisecond)
+		t.Fatalf("WAIT 0 GET on stolen telnet KB0 failed\nKB1=%q\nKB0=%q", kb1out, kb0out)
+	}
+}
+
+func TestTelnetMITM(t *testing.T) {
+	cfg := Config{MaxUsers: 6, Telnet: true, TelnetPort: 0, TelnetBind: "127.0.0.1", Console: false}
+	sys, err := NewSystem(t.TempDir(), cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer waitJobs(sys, 0)
+	defer sys.Close()
+	addr, err := sys.StartTelnet()
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	kb0, err := net.DialTimeout("tcp", addr, 2*time.Second)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer kb0.Close()
+	if !strings.Contains(telnetWait(kb0, "Bye", 2*time.Second), "Bye") {
+		t.Fatal("KB0 never reached Bye")
+	}
+
+	kb1, err := net.DialTimeout("tcp", addr, 2*time.Second)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer kb1.Close()
+	_, _ = kb1.Write([]byte("HELLO GUEST\r\nGUEST\r\n"))
+	if !strings.Contains(telnetWait(kb1, "Ready", 3*time.Second), "Ready") {
+		t.Fatal("KB1 did not log in")
+	}
+
+	stop := make(chan struct{})
+	defer close(stop)
+	var tap, remote strings.Builder
+	var mu sync.Mutex
+	go scoopConn(kb0, &remote, &mu, stop)
+	go scoopConn(kb1, &tap, &mu, stop)
+
+	_, _ = kb1.Write([]byte("OLD MITM\r\nRUN\r\n"))
+	if !waitBuilder(&mu, &tap, "Bye", 3*time.Second) {
+		t.Fatalf("MITM tap never showed PK Bye: %q", builderStr(&mu, &tap))
+	}
+	if !waitBuilder(&mu, &remote, "Bye", 2*time.Second) && !waitBuilder(&mu, &remote, "RSTS", 2*time.Second) {
+		t.Fatalf("stolen KB0 never saw PK banner: remote=%q tap=%q", builderStr(&mu, &remote), builderStr(&mu, &tap))
+	}
+
+	_, _ = kb0.Write([]byte("hello 100,100\r\n"))
+	if !waitBuilder(&mu, &remote, "Password:", 3*time.Second) {
+		t.Fatalf("typing on stolen KB0 did nothing; remote=%q tap=%q", builderStr(&mu, &remote), builderStr(&mu, &tap))
+	}
+	_, _ = kb0.Write([]byte("GUEST\r\n"))
+	if !waitBuilder(&mu, &remote, "User:", 5*time.Second) && !waitBuilder(&mu, &remote, "Ready", 5*time.Second) {
+		t.Fatalf("login through MITM failed; remote=%q tap=%q", builderStr(&mu, &remote), builderStr(&mu, &tap))
+	}
+	_, _ = kb0.Write([]byte("dir\r\n"))
+	deadline := time.Now().Add(3 * time.Second)
+	for time.Now().Before(deadline) {
+		got := builderStr(&mu, &remote)
+		if strings.Contains(got, ".BAS") || strings.Contains(got, "NIM") || strings.Contains(got, "Name") {
+			return
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	t.Fatalf("DIR through MITM failed; remote=%q tap=%q", builderStr(&mu, &remote), builderStr(&mu, &tap))
+}
+
+func TestTelnetMITMCtrlC(t *testing.T) {
+	cfg := Config{MaxUsers: 6, Telnet: true, TelnetPort: 0, TelnetBind: "127.0.0.1", Console: false}
+	sys, err := NewSystem(t.TempDir(), cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer waitJobs(sys, 0)
+	defer sys.Close()
+	addr, err := sys.StartTelnet()
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	kb0, err := net.DialTimeout("tcp", addr, 2*time.Second)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer kb0.Close()
+	if !strings.Contains(telnetWait(kb0, "Bye", 2*time.Second), "Bye") {
+		t.Fatal("KB0 never reached Bye")
+	}
+
+	kb1, err := net.DialTimeout("tcp", addr, 2*time.Second)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer kb1.Close()
+	_, _ = kb1.Write([]byte("HELLO GUEST\r\nGUEST\r\n"))
+	if !strings.Contains(telnetWait(kb1, "Ready", 3*time.Second), "Ready") {
+		t.Fatal("KB1 did not log in")
+	}
+
+	stop := make(chan struct{})
+	defer close(stop)
+	var tap strings.Builder
+	var mu sync.Mutex
+	go scoopConn(kb1, &tap, &mu, stop)
+
+	_, _ = kb1.Write([]byte("OLD MITM\r\nRUN\r\n"))
+	if !waitBuilder(&mu, &tap, "Bye", 3*time.Second) {
+		t.Fatalf("MITM did not start: %q", builderStr(&mu, &tap))
+	}
+	time.Sleep(200 * time.Millisecond)
+	before := builderStr(&mu, &tap)
+	_, _ = kb1.Write([]byte{3})
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) {
+		got := builderStr(&mu, &tap)
+		extra := ""
+		if len(got) > len(before) {
+			extra = got[len(before):]
+		}
+		if strings.Contains(extra, "Ready") || strings.Contains(extra, "^C") {
+			return
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	_, _ = kb1.Write([]byte{255, 244}) // IAC IP
+	deadline = time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) {
+		got := builderStr(&mu, &tap)
+		extra := ""
+		if len(got) > len(before) {
+			extra = got[len(before):]
+		}
+		if strings.Contains(extra, "Ready") || strings.Contains(extra, "^C") {
+			return
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	t.Fatalf("Ctrl-C did not stop MITM; tap=%q", builderStr(&mu, &tap))
 }

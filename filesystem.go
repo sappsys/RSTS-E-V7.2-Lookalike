@@ -20,6 +20,8 @@ const (
 	compiledProt = 124
 	// Typical public privileged compiled program (64+128+32+8).
 	privCompiledProt = 232
+	// Public compiled CUSP: executable, world may RUN, not privileged.
+	publicCompiledProt = 64 + 32 + 8
 
 	protOwnerRead  = 1
 	protOwnerWrite = 2
@@ -378,7 +380,7 @@ func (d *Disk) AccountDir(proj, prog int) (string, error) {
 }
 
 func (d *Disk) RemoveAccount(proj, prog int) error {
-	if proj == 1 && prog == 2 {
+	if isLibraryPPN(proj, prog) {
 		return fsErr("Protection violation")
 	}
 	path := filepath.Join(d.SY, fmt.Sprintf("%d,%d", proj, prog))
@@ -846,7 +848,7 @@ func (d *Disk) locate(spec FileSpec, curProj, curProg int, privileged, mustExist
 	if spec.Proj != nil {
 		proj, prog = *spec.Proj, *spec.Prog
 	}
-	if !privileged && (proj != curProj || prog != curProg) && !(proj == 1 && prog == 2) {
+	if !privileged && (proj != curProj || prog != curProg) && !isLibraryPPN(proj, prog) {
 		return "", 0, 0, fsErr("Protection violation")
 	}
 	if spec.Name == "*" || spec.Name == "" {

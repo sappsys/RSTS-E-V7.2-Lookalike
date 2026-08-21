@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io"
 	"net"
+	"os"
 	"strconv"
 	"strings"
 	"sync"
@@ -50,6 +51,7 @@ type telnetConn struct {
 	rows    int
 	skipNL  bool
 	kicked  bool
+	stolen  bool
 	pending []byte
 	discard bool
 	fill    int
@@ -83,45 +85,86 @@ func (t *telnetConn) InterruptRead() {
 	_ = t.c.SetReadDeadline(time.Now())
 }
 
+func (t *telnetConn) SetStolen(on bool) {
+	t.wmu.Lock()
+	t.stolen = on
+	t.wmu.Unlock()
+	if on {
+		t.InterruptRead()
+		return
+	}
+	_ = t.c.SetReadDeadline(time.Time{})
+}
+
+func (t *telnetConn) isStolen() bool {
+	t.wmu.Lock()
+	defer t.wmu.Unlock()
+	return t.stolen
+}
+
 // PollInterrupt consumes Ctrl-C waiting on the connection without blocking.
 // Other bytes are queued for the next ReadLine.
 func (t *telnetConn) PollInterrupt() bool {
-	_ = t.c.SetReadDeadline(time.Now())
-	defer t.c.SetReadDeadline(time.Time{})
 	hit := false
+	kept := t.pending[:0]
+	for _, b := range t.pending {
+		if b == 3 {
+			hit = true
+			continue
+		}
+		kept = append(kept, b)
+	}
+	t.pending = kept
+
+	for t.r.Buffered() > 0 {
+		b, err := t.r.ReadByte()
+		if err != nil {
+			return hit
+		}
+		if t.notePollByte(b) {
+			hit = true
+		}
+	}
+	_ = t.c.SetReadDeadline(time.Now().Add(time.Millisecond))
+	defer t.c.SetReadDeadline(time.Time{})
 	for {
 		b, err := t.r.ReadByte()
 		if err != nil {
 			break
 		}
-		if b == 3 {
+		if t.notePollByte(b) {
 			hit = true
-			continue
 		}
-		if b == 15 { // Ctrl-O
-			t.toggleDiscard()
-			continue
-		}
-		if b == iac {
-			b2, err := t.r.ReadByte()
-			if err != nil {
-				t.pending = append(t.pending, iac)
-				break
-			}
-			if b2 == ip || b2 == brk {
-				hit = true
-				continue
-			}
-			if b2 == ao {
-				t.toggleDiscard()
-				continue
-			}
-			t.pending = append(t.pending, iac, b2)
-			continue
-		}
-		t.pending = append(t.pending, b)
 	}
 	return hit
+}
+
+func (t *telnetConn) notePollByte(b byte) bool {
+	if b == 3 {
+		return true
+	}
+	if b == 15 {
+		t.toggleDiscard()
+		return false
+	}
+	if b != iac {
+		t.pending = append(t.pending, b)
+		return false
+	}
+	b2, err := t.r.ReadByte()
+	if err != nil {
+		t.pending = append(t.pending, iac)
+		return false
+	}
+	if b2 == ip || b2 == brk {
+		return true
+	}
+	if b2 == ao {
+		t.toggleDiscard()
+		return false
+	}
+	t.pending = append(t.pending, iac, b2)
+	return false
 }
 
 func (t *telnetConn) takeKick() bool {
@@ -212,6 +255,51 @@ func (t *telnetConn) ReadLine(prompt string) (string, error) {
 	return t.readEdit(prompt, t.echo)
 }
 
+func (t *telnetConn) GetByte(wait time.Duration) (byte, error) {
+	if len(t.pending) > 0 || t.r.Buffered() > 0 {
+		return t.readData()
+	}
+	if wait == 0 {
+		if t.r.Buffered() > 0 || len(t.pending) > 0 {
+			return t.readData()
+		}
+		_ = t.c.SetReadDeadline(time.Now().Add(time.Millisecond))
+		b, err := t.readData()
+		_ = t.c.SetReadDeadline(time.Time{})
+		if err != nil {
+			if t.takeKick() {
+				return 0, errForced
+			}
+			if ne, ok := err.(net.Error); ok && ne.Timeout() {
+				return 0, errWaitTimeout
+			}
+			if os.IsTimeout(err) {
+				return 0, errWaitTimeout
+			}
+			return 0, err
+		}
+		return b, nil
+	}
+	if wait > 0 {
+		_ = t.c.SetReadDeadline(time.Now().Add(wait))
+		defer t.c.SetReadDeadline(time.Time{})
+	}
+	b, err := t.readData()
+	if err != nil {
+		if t.takeKick() {
+			return 0, errForced
+		}
+		if ne, ok := err.(net.Error); ok && ne.Timeout() {
+			return 0, errWaitTimeout
+		}
+		if os.IsTimeout(err) {
+			return 0, errWaitTimeout
+		}
+		return 0, err
+	}
+	return b, nil
+}
+
 func (t *telnetConn) SetEcho(on bool) {
 	t.wmu.Lock()
 	t.echo = on
@@ -257,7 +345,16 @@ func (t *telnetConn) readEdit(prompt string, echo bool) (string, error) {
 	csi := ""
 	yNeed := 0
 	for {
+		if t.isStolen() {
+			return "", errForced
+		}
 		b, err := t.readData()
+		if t.isStolen() {
+			if err == nil {
+				t.pending = append([]byte{b}, t.pending...)
+			}
+			return "", errForced
+		}
 		if err != nil {
 			if len(buf) > 0 && err == io.EOF {
 				return string(buf), nil

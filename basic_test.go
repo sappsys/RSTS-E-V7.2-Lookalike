@@ -242,6 +242,9 @@ func TestAccounts(t *testing.T) {
 	if err := db.Delete(1, 2); err == nil {
 		t.Fatal("should not delete [1,2]")
 	}
+	if err := db.Delete(1, 9); err == nil {
+		t.Fatal("should not delete [1,9]")
+	}
 	if _, err := db.Create(150, 1, "BAD NAME", "X", false); err == nil {
 		t.Fatal("illegal name")
 	}
@@ -296,6 +299,12 @@ func TestAccountCommands(t *testing.T) {
 	if err := sh.cmdDeleteAccount("1,2"); err == nil {
 		t.Fatal("delete [1,2]")
 	}
+	if err := sh.cmdDeleteAccount("[1,9]"); err == nil {
+		t.Fatal("delete LIBRARY")
+	}
+	if err := sh.cmdDeleteAccount("1,9"); err == nil {
+		t.Fatal("delete [1,9]")
+	}
 	if err := sh.cmdDeleteAccount("150,1"); err != nil {
 		t.Fatal(err)
 	}
@@ -322,6 +331,37 @@ func TestAccountCommands(t *testing.T) {
 	}
 	if sh.Accounts.FindPPN(160, 2) != nil {
 		t.Fatal("react delete")
+	}
+}
+
+func TestProjectOneIsPrivileged(t *testing.T) {
+	sh, err := NewShell(t.TempDir(), "", false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	sh.Login("SYSTEM", "SYSTEM")
+	if err := sh.cmdCreate("1,4 NAME OPR PASSWORD SECRET"); err != nil {
+		t.Fatal(err)
+	}
+	a := sh.Accounts.FindPPN(1, 4)
+	if a == nil || !a.HasPrivilege() {
+		t.Fatal("[1,4] must be privileged")
+	}
+	sh.cmdBye("")
+	sh.Login("OPR", "SECRET")
+	if !sh.accountPriv() {
+		t.Fatal("[1,4] login must have privilege")
+	}
+	var out strings.Builder
+	sh.out = &out
+	if err := sh.cmdAccount(); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(out.String(), "Privileged") {
+		t.Fatalf("ACCOUNT: %q", out.String())
+	}
+	if err := sh.cmdCreate("181,1 NAME ZOE PASSWORD X"); err != nil {
+		t.Fatal("[1,4] CREATE should work")
 	}
 }
 

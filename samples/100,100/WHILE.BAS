@@ -1,0 +1,7 @@
+10 I = 1
+20 WHILE I <= 5
+30 PRINT "I ="; I
+40 I = I+1
+50 NEXT
+60 PRINT "DONE"
+70 END

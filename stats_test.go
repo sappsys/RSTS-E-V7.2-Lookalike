@@ -10,7 +10,10 @@ import (
 	"time"
 )
 
-type quietTerm struct{ in []string }
+type quietTerm struct {
+	in    []string
+	bytes []byte
+}
 
 func (t *quietTerm) ReadLine(string) (string, error) {
 	if len(t.in) == 0 {
@@ -22,6 +25,18 @@ func (t *quietTerm) ReadLine(string) (string, error) {
 }
 
 func (t *quietTerm) ReadPassword(p string) (string, error) { return t.ReadLine(p) }
+
+func (t *quietTerm) GetByte(wait time.Duration) (byte, error) {
+	if len(t.bytes) > 0 {
+		b := t.bytes[0]
+		t.bytes = t.bytes[1:]
+		return b, nil
+	}
+	if wait >= 0 {
+		return 0, errWaitTimeout
+	}
+	return 0, os.ErrClosed
+}
 
 func TestJobSizeTracksStorage(t *testing.T) {
 	m := NewMachine(IO{})

@@ -9,7 +9,7 @@ import (
 
 // The character devices a program can OPEN alongside disk files.
 //
-//	KB:  TT:   this job's terminal, or KBn: for another one
+//	KB:  TT:   this job's terminal, or KBn: at Bye (any user)
 //	LP:        the line printer, spooled to a file in the account
 //	NL:        the null device
 //
@@ -50,15 +50,24 @@ func parseCharDevice(path string) (dev string, unit int, unitSet bool, rest stri
 	return "", 0, false, "", false
 }
 
-// kbDev is a terminal on a channel. Writing to another job's keyboard is
-// the same privilege as FORCE and BROADCAST, and only your own terminal
-// can be read.
+// kbDev is a terminal on a channel. OPEN of your own KB: reads and
+// writes this job. OPEN of another KBn: at Bye assigns that line: I/O
+// goes through this channel until CLOSE, and the login job waits.
 type kbDev struct {
-	out  io.Writer
-	self *Shell
+	out   io.Writer
+	self  *Shell
+	peer  *Shell
+	owner *Shell
 }
 
 func (d *kbDev) devWrite(text string) error {
+	if d.peer != nil {
+		if d.peer.out != nil {
+			_, err := fmt.Fprint(d.peer.out, text)
+			return err
+		}
+		return nil
+	}
 	if d.self != nil {
 		d.self.write(text, false)
 		return nil
@@ -68,13 +77,24 @@ func (d *kbDev) devWrite(text string) error {
 }
 
 func (d *kbDev) devReadLine() (string, error) {
+	if d.peer != nil {
+		if d.peer.term == nil {
+			return "", basicErr("I/O error")
+		}
+		return d.peer.term.ReadLine("")
+	}
 	if d.self == nil {
 		return "", basicErr("I/O error")
 	}
 	return d.self.readLine("")
 }
 
-func (d *kbDev) devClose() {}
+func (d *kbDev) devClose() {
+	if d.peer == nil || d.owner == nil || d.owner.sys == nil {
+		return
+	}
+	d.owner.sys.dropKB(d.peer.KB, d.owner.Job)
+}
 
 // nullDev swallows output and is at end of file straight away.
 type nullDev struct{}
@@ -95,13 +115,13 @@ func (s *Shell) openCharDevice(m *Machine, channel int, dev string, unit int, un
 				if other == nil {
 					return basicErr("Not a valid device")
 				}
-				if !s.priv() {
-					return basicErr("Protection violation")
+				if err := s.sys.takeKB(other, s); err != nil {
+					return err
 				}
 				m.Files[channel] = &chanFile{
 					mode:  mode,
 					class: devKeyboard,
-					dev:   &kbDev{out: other.out},
+					dev:   &kbDev{out: other.out, peer: other, owner: s},
 				}
 				return nil
 			}

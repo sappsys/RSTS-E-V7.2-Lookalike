@@ -11,9 +11,10 @@ import (
 )
 
 var (
-	ErrBusy      = errors.New("Maximum users exceeded")
-	ErrInterrupt = errors.New("interrupt")
-	errForced    = errors.New("forced")
+	ErrBusy        = errors.New("Maximum users exceeded")
+	ErrInterrupt   = errors.New("interrupt")
+	errForced      = errors.New("forced")
+	errWaitTimeout = errors.New("keyboard wait exhausted")
 )
 
 // Job is one attached terminal (console, Telnet, or PK: slave).
@@ -33,6 +34,7 @@ type Job struct {
 	OwnerJob int
 	OwnerPPN string
 	PKLink   *pkLink
+	RTS      string
 }
 
 // System is the shared timesharing host: disk, accounts, job table.
@@ -51,6 +53,31 @@ type System struct {
 	shutdown chan struct{}
 	console  *Shell
 	noLogins bool
+	kbOwner  map[string]*kbAssign
+}
+
+// kbAssign is a KBn: taken by OPEN. Bye/Ready on that line waits until CLOSE.
+type kbAssign struct {
+	ownerJob int
+	peer     *Shell
+	once     sync.Once
+	parkOnce sync.Once
+	done     chan struct{}
+	parked   chan struct{}
+}
+
+func (a *kbAssign) release() {
+	if a == nil {
+		return
+	}
+	a.once.Do(func() { close(a.done) })
+}
+
+func (a *kbAssign) markParked() {
+	if a == nil {
+		return
+	}
+	a.parkOnce.Do(func() { close(a.parked) })
 }
 
 func NewSystem(diskRoot string, cfg Config) (*System, error) {
@@ -87,6 +114,10 @@ func NewSystem(diskRoot string, cfg Config) (*System, error) {
 	if err := sys.seedSamples(); err != nil {
 		return nil, err
 	}
+	if err := sys.seedDefaultCCL(); err != nil {
+		return nil, err
+	}
+	applyInitState(sys)
 	sys.startSpooler()
 	return sys, nil
 }
@@ -123,15 +154,17 @@ func (sys *System) Attach(remote string) (*Job, error) {
 		State:   "KB",
 		Started: time.Now(),
 		PK:      -1,
+		RTS:     "BASIC",
 	}
 	sys.jobs[n] = j
 	return j, nil
 }
 
 func (sys *System) Detach(num int) {
+	sys.releaseKBForJob(num)
 	sys.mu.Lock()
-	defer sys.mu.Unlock()
 	delete(sys.jobs, num)
+	sys.mu.Unlock()
 }
 
 func (sys *System) SetJob(num int, who, what string) {
@@ -237,6 +270,129 @@ func (sys *System) shellOnKB(kb string) *Shell {
 		}
 	}
 	return nil
+}
+
+func interruptShellTerm(sh *Shell) {
+	if sh == nil || sh.term == nil {
+		return
+	}
+	if t, ok := sh.term.(interface{ InterruptRead() }); ok {
+		t.InterruptRead()
+	}
+}
+
+// takeKB assigns a free (Bye) keyboard to owner. A logged-in line needs
+// privilege. I/O on that KBn: then goes through the OPEN channel until CLOSE.
+func (sys *System) takeKB(peer, owner *Shell) error {
+	if sys == nil || peer == nil || owner == nil {
+		return basicErr("Not a valid device")
+	}
+	sys.mu.Lock()
+	if sys.kbOwner == nil {
+		sys.kbOwner = map[string]*kbAssign{}
+	}
+	kb := peer.KB
+	if sys.kbOwner[kb] != nil {
+		sys.mu.Unlock()
+		return basicErrCode("Account or device in use", 3)
+	}
+	if j := sys.jobs[peer.Job]; j != nil && j.PK >= 0 {
+		sys.mu.Unlock()
+		return basicErr("Not a valid device")
+	}
+	loggedIn := peer.Account != nil
+	if j := sys.jobs[peer.Job]; j != nil && j.Who != "" && j.Who != "*****" {
+		loggedIn = true
+	}
+	if loggedIn && !owner.priv() {
+		sys.mu.Unlock()
+		return basicErr("Protection violation")
+	}
+	a := &kbAssign{ownerJob: owner.Job, peer: peer, done: make(chan struct{}), parked: make(chan struct{})}
+	sys.kbOwner[kb] = a
+	sys.mu.Unlock()
+	if t, ok := peer.term.(interface{ SetStolen(bool) }); ok {
+		t.SetStolen(true)
+		timer := time.NewTimer(2 * time.Second)
+		defer timer.Stop()
+		select {
+		case <-a.parked:
+		case <-timer.C:
+		}
+	} else {
+		interruptShellTerm(peer)
+	}
+	return nil
+}
+
+func (sys *System) dropKB(kb string, ownerJob int) {
+	if sys == nil {
+		return
+	}
+	sys.mu.Lock()
+	a := sys.kbOwner[kb]
+	if a == nil {
+		sys.mu.Unlock()
+		return
+	}
+	if ownerJob != 0 && a.ownerJob != ownerJob {
+		sys.mu.Unlock()
+		return
+	}
+	delete(sys.kbOwner, kb)
+	peer := a.peer
+	sys.mu.Unlock()
+	if peer != nil {
+		if t, ok := peer.term.(interface{ SetStolen(bool) }); ok {
+			t.SetStolen(false)
+		}
+	}
+	a.release()
+}
+
+func (sys *System) kbAssigned(kb string) bool {
+	if sys == nil {
+		return false
+	}
+	sys.mu.Lock()
+	defer sys.mu.Unlock()
+	return sys.kbOwner[kb] != nil
+}
+
+func (sys *System) waitKBReleased(kb string) {
+	for {
+		sys.mu.Lock()
+		a := sys.kbOwner[kb]
+		sys.mu.Unlock()
+		if a == nil {
+			return
+		}
+		a.markParked()
+		<-a.done
+	}
+}
+
+func (sys *System) releaseKBForJob(num int) {
+	if sys == nil {
+		return
+	}
+	sys.mu.Lock()
+	var peers []*Shell
+	for kb, a := range sys.kbOwner {
+		if a.ownerJob == num || (a.peer != nil && a.peer.Job == num) {
+			delete(sys.kbOwner, kb)
+			if a.peer != nil {
+				peers = append(peers, a.peer)
+			}
+			a.release()
+		}
+	}
+	sys.mu.Unlock()
+	for _, peer := range peers {
+		if t, ok := peer.term.(interface{ SetStolen(bool) }); ok {
+			t.SetStolen(false)
+		}
+	}
 }
 
 func (sys *System) setConsole(s *Shell) {

@@ -262,7 +262,7 @@ func (s *Shell) cmdUtility(rest string) error {
 	}
 	switch {
 	case arg == "" || arg == "LI" || strings.HasPrefix(arg, "LI "):
-		fmt.Fprintln(s.out, "UTILITY")
+		fmt.Fprintln(s.out, "UTILITY  (privileged)")
 		fmt.Fprintln(s.out, "  REACT     accounts / quotas")
 		fmt.Fprintln(s.out, "  DSKINT    initialize a pack")
 		fmt.Fprintln(s.out, "  CCL       install a keyboard command")
@@ -277,7 +277,7 @@ func (s *Shell) cmdUtility(rest string) error {
 	case strings.HasPrefix(arg, "DSKINT"):
 		return s.cmdDskint(strings.TrimSpace(arg[6:]))
 	default:
-		fmt.Fprintln(s.out, "REACT  DSKINT  CCL  SHUTUP")
+		fmt.Fprintln(s.out, "REACT  DSKINT  CCL  SHUTUP  (privileged)")
 		return nil
 	}
 }

@@ -1,0 +1,5 @@
+System account [1,2]. @@LONG@@.
+Password is SYSTEM.
+
+This account holds the system library CUSPs (PIP, DIR, SYSTAT, ...).
+Demos and the COMP.BAS exerciser are on [1,9].

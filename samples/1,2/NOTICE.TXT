@@ -1,0 +1,4 @@
+Welcome to @@LONG@@ on PDP-11/70.
+Log in with HELLO, then type HELP or SHOW CPU.
+Every [1,*] account is privileged; SYSTEM is 1,2.
+Library programs are on [1,9]; RUN [1,9]WHOAMI from a guest account to try a privileged compiled program.

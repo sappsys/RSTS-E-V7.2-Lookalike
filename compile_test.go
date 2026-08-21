@@ -66,15 +66,15 @@ func TestCompileAndPrivilege(t *testing.T) {
 		t.Fatalf("non-priv .BAC should not grant privilege: %q", out.String())
 	}
 
-	if err := sh.cmdOld("$WHOAMI.BAC"); err == nil {
+	if err := sh.cmdOld("[1,9]WHOAMI.BAC"); err == nil {
 		t.Fatal("guest OLD of privileged .BAC")
 	}
-	if err := sh.cmdType("$WHOAMI.BAC"); err == nil {
+	if err := sh.cmdType("[1,9]WHOAMI.BAC"); err == nil {
 		t.Fatal("guest TYPE of privileged .BAC")
 	}
 
 	out.Reset()
-	sh.cmdRun("$WHOAMI", false)
+	sh.cmdRun("[1,9]WHOAMI", false)
 	got := out.String()
 	if !strings.Contains(got, "[100,100]") {
 		t.Fatalf("whoami ppn: %q", got)

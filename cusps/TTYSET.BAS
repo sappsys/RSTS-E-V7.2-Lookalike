@@ -1,0 +1,5 @@
+10 EXTEND
+20 C$=SYS(CHR$(6%)+CHR$(-18%))
+30 X$=SYS(CHR$(6%)+CHR$(-31%)+C$)
+40 PRINT X$;
+50 END

@@ -123,6 +123,8 @@ type IO struct {
 	Quota         int
 	PollInterrupt func() bool
 	// FIP hooks used by SYS(CHR$(6%)+…). A nil func is a no-op zeros return.
+	CCLLine   string
+	FipExtra  func(sub int, raw string) (string, error)
 	Hangup    func() error
 	Assign    func(dev, logical string) error
 	Deassign  func(name string) error
@@ -162,6 +164,7 @@ type Machine struct {
 	resumeLine  int
 	inHandler   bool
 	cpuStart    time.Time
+	connectAt   time.Time
 	cpuNanos    atomic.Int64
 	waitNanos   atomic.Int64
 	intr        atomic.Bool
@@ -198,11 +201,13 @@ func NewMachine(io IO) *Machine {
 	if !io.Echo {
 		io.Echo = true
 	}
+	now := time.Now()
 	m := &Machine{
 		IO:          io,
 		ProgramName: "NONAME",
-		rng:         rand.New(rand.NewSource(time.Now().UnixNano())),
-		cpuStart:    time.Now(),
+		rng:         rand.New(rand.NewSource(now.UnixNano())),
+		cpuStart:    now,
+		connectAt:   now,
 	}
 	m.resetRuntime()
 	m.Program = map[int]string{}
@@ -238,7 +243,7 @@ func (m *Machine) resetRuntime() {
 	m.matNum = 0
 	m.matNum2 = 0
 	m.common = nil
-	m.inputWait = 0
+	m.inputWait = -1
 	m.trapCtrlC = false
 }
 
@@ -288,7 +293,7 @@ func (m *Machine) readInput(prompt string) (string, error) {
 	}
 	start := time.Now()
 	defer m.noteWait(start)
-	if m.inputWait <= 0 {
+	if m.inputWait < 0 {
 		s, err := m.IO.Read(prompt)
 		if errors.Is(err, ErrInterrupt) {
 			return "", m.interruptErr()
@@ -1319,7 +1324,7 @@ func (m *Machine) eval(e expr) (value, error) {
 			if err != nil {
 				return value{}, err
 			}
-			return numValue(float64(^int(x))), nil
+			return numValue(fromInt16(^int16Bits(x))), nil
 		default:
 			return value{}, m.err("Syntax error")
 		}
@@ -1447,16 +1452,42 @@ func (m *Machine) binOp(op string, left, right value) (value, error) {
 		return numValue(math.Pow(a, b)), err
 	case "AND":
 		a, b, err := m.nums(left, right)
-		return numValue(float64(int(a) & int(b))), err
+		if err != nil {
+			return value{}, err
+		}
+		return numValue(fromInt16(int16Bits(a) & int16Bits(b))), nil
 	case "OR":
 		a, b, err := m.nums(left, right)
-		return numValue(float64(int(a) | int(b))), err
+		if err != nil {
+			return value{}, err
+		}
+		return numValue(fromInt16(int16Bits(a) | int16Bits(b))), nil
+	case "XOR":
+		a, b, err := m.nums(left, right)
+		if err != nil {
+			return value{}, err
+		}
+		return numValue(fromInt16(int16Bits(a) ^ int16Bits(b))), nil
+	case "EQV":
+		a, b, err := m.nums(left, right)
+		if err != nil {
+			return value{}, err
+		}
+		return numValue(fromInt16(^(int16Bits(a) ^ int16Bits(b)))), nil
+	case "IMP":
+		a, b, err := m.nums(left, right)
+		if err != nil {
+			return value{}, err
+		}
+		return numValue(fromInt16(^int16Bits(a) | int16Bits(b))), nil
 	}
 	var ok bool
 	if left.isStr || right.isStr {
 		ls, rs := m.strVal(left), m.strVal(right)
 		switch op {
 		case "=":
+			ok = ls == rs
+		case "==":
 			ok = ls == rs
 		case "<>":
 			ok = ls != rs
@@ -1479,6 +1510,8 @@ func (m *Machine) binOp(op string, left, right value) (value, error) {
 		switch op {
 		case "=":
 			ok = a == b
+		case "==":
+			ok = approxEqual(a, b)
 		case "<>":
 			ok = a != b
 		case "<":
@@ -1497,6 +1530,17 @@ func (m *Machine) binOp(op string, left, right value) (value, error) {
 		return numValue(-1), nil
 	}
 	return numValue(0), nil
+}
+
+func int16Bits(n float64) int16 { return int16(int32(n)) }
+
+func fromInt16(v int16) float64 { return float64(v) }
+
+func approxEqual(a, b float64) bool {
+	if a == b {
+		return true
+	}
+	return strings.TrimSpace(fmtNum(a)) == strings.TrimSpace(fmtNum(b))
 }
 
 func (m *Machine) nums(l, r value) (float64, float64, error) {
@@ -1618,7 +1662,7 @@ func (m *Machine) call(name string, args []value) (value, error) {
 		return numValue(math.Pi), nil
 	case "LEN":
 		return numValue(float64(len(args_(0)))), nil
-	case "ASC":
+	case "ASC", "ASCII":
 		s := args_(0)
 		if s == "" {
 			return numValue(0), nil
@@ -1681,7 +1725,19 @@ func (m *Machine) call(name string, args []value) (value, error) {
 		}
 		switch int(which) {
 		case 1:
-			return numValue(m.CPUTime().Seconds()), nil
+			// Digital TIME(1) is tenths of a second of CPU time.
+			tenths := float64(m.CPUTime() / (100 * time.Millisecond))
+			return numValue(tenths), nil
+		case 2:
+			mins := 0.0
+			if !m.connectAt.IsZero() {
+				mins = time.Since(m.connectAt).Minutes()
+			}
+			return numValue(mins), nil
+		case 3:
+			// One kilo-core-tick is 1K words occupied for 1/10 s of CPU.
+			tenths := float64(m.CPUTime() / (100 * time.Millisecond))
+			return numValue(tenths * float64(m.SizeKW())), nil
 		default:
 			return numValue(secondsSinceMidnight()), nil
 		}

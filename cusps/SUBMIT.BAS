@@ -1,0 +1,6 @@
+10 EXTEND
+20 C$=SYS(CHR$(6%)+CHR$(-18%))
+30 IF C$="" THEN PRINT "?SUBMIT filespec" \ END
+40 X$=SYS(CHR$(6%)+CHR$(-33%)+C$)
+50 PRINT X$;
+60 END

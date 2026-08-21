@@ -24,6 +24,12 @@ type Account struct {
 func (a Account) PPN() string     { return fmt.Sprintf("%d,%d", a.Proj, a.Prog) }
 func (a Account) Display() string { return fmt.Sprintf("[%d,%d]", a.Proj, a.Prog) }
 
+// On V7.2 every [1,pn] account is privileged (JFSYS). The stored flag
+// is kept in step with that; it cannot turn project 1 off.
+func (a *Account) HasPrivilege() bool {
+	return a != nil && (a.Proj == 1 || a.Privileged)
+}
+
 func (a Account) Matches(token string) bool {
 	t := strings.ToUpper(strings.ReplaceAll(strings.TrimSpace(token), " ", ""))
 	t = strings.ReplaceAll(strings.ReplaceAll(t, "[", ""), "]", "")
@@ -45,8 +51,17 @@ type accountFile struct {
 
 var defaultAccounts = []Account{
 	{Proj: 1, Prog: 2, Name: "SYSTEM", Password: "SYSTEM", Privileged: true},
+	{Proj: 1, Prog: 9, Name: "LIBRARY", Password: "LIBRARY", Privileged: true},
 	{Proj: 100, Prog: 100, Name: "GUEST", Password: "GUEST"},
 	{Proj: 200, Prog: 200, Name: "DEMO", Password: "DEMO"},
+}
+
+// [1,2] is the system library (CUSPs). [1,9] holds the other stock
+// programs (COMP, DATA, WHOAMI). Both are created at init and cannot
+// be deleted. Privilege is not special to these two: every [1,pn]
+// account is privileged.
+func isLibraryPPN(proj, prog int) bool {
+	return proj == 1 && (prog == 2 || prog == 9)
 }
 
 type AccountDB struct {
@@ -108,24 +123,43 @@ func (db *AccountDB) Load() error {
 		a := file.Accounts[i]
 		db.Accounts[i] = &a
 	}
-	if db.ensureSystemLocked() {
+	if db.ensureSystemLocked() || db.normalizePrivilegeLocked() {
 		return db.saveLocked()
 	}
 	return nil
 }
 
-// The system account is structural: DSKINT puts [1,2] on every pack and
-// DELETE/ACCOUNT refuses to remove it. Restore it if the file was edited
-// or truncated to drop it, or nothing could administer the system.
+// [1,2] and [1,9] are structural: DELETE/ACCOUNT refuses to remove them.
+// Restore either if the file was edited or truncated to drop it.
 func (db *AccountDB) ensureSystemLocked() bool {
+	changed := false
+	for _, def := range defaultAccounts {
+		if !isLibraryPPN(def.Proj, def.Prog) {
+			continue
+		}
+		if db.findPPNLocked(def.Proj, def.Prog) != nil {
+			continue
+		}
+		c := def
+		if def.Proj == 1 && def.Prog == 2 {
+			db.Accounts = append([]*Account{&c}, db.Accounts...)
+		} else {
+			db.Accounts = append(db.Accounts, &c)
+		}
+		changed = true
+	}
+	return changed
+}
+
+func (db *AccountDB) normalizePrivilegeLocked() bool {
+	changed := false
 	for _, a := range db.Accounts {
-		if a != nil && a.Proj == 1 && a.Prog == 2 {
-			return false
+		if a != nil && a.Proj == 1 && !a.Privileged {
+			a.Privileged = true
+			changed = true
 		}
 	}
-	system := defaultAccounts[0]
-	db.Accounts = append([]*Account{&system}, db.Accounts...)
-	return true
+	return changed
 }
 
 func (db *AccountDB) Save() error {
@@ -246,7 +280,7 @@ func (db *AccountDB) SetPassword(acct *Account, password string) error {
 func (db *AccountDB) Delete(proj, prog int) error {
 	db.mu.Lock()
 	defer db.mu.Unlock()
-	if proj == 1 && prog == 2 {
+	if isLibraryPPN(proj, prog) {
 		return fmt.Errorf("Protection violation")
 	}
 	idx := -1

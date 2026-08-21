@@ -23,9 +23,9 @@ import (
 // its own releases, so a build reports the release it came from. Bump
 // Version and everything else follows.
 const (
-	Version       = "7.2-12"
-	SystemRelease = "V" + Version           // V7.2-12
-	SystemName    = "RSTS " + SystemRelease // RSTS V7.2-12
+	Version       = "7.2-13"
+	SystemRelease = "V" + Version           // V7.2-13
+	SystemName    = "RSTS " + SystemRelease // RSTS V7.2-13
 	SystemLong    = "RSTS/E " + SystemRelease
 )
 
@@ -48,6 +48,8 @@ Topics:
   ACCOUNTS  default logins
   COMPILE   .BAC / .PAC files and the privilege bit
   HARDWARE  PDP-11/70 configuration
+  SWITCH    BASIC / RSX run-time systems
+  INIT      startup before timesharing
   TELNET    multi-user Telnet / VT52
   SERIAL    terminals on serial lines
   JOBS      SYSTAT, ATTACH, PK:
@@ -64,7 +66,7 @@ HELP DIRECTORY, HELP HELLO, and HELP PIP are accepted.
 HELLO/DETACH        log in and detach this job (keyboard returns to Bye)
 BYE                 log out (returns to Bye)
 PASSWORD            change your password
-PASSWORD [p,pn]     (priv) set another account's password
+PASSWORD [p,pn]     (privileged) set another account's password
 
 Logged-out prompt is  Bye
 Logged-in prompt is   Ready
@@ -74,6 +76,7 @@ START.BAS in the account if one exists.
 
 At Bye:
   HELLO             log in
+  SYSTAT / SYS / WHO   jobs (no login)
   EXIT / QUIT       stop the emulator (console)
   BYE               hang up a Telnet line; on the console, stay at Bye
 
@@ -97,17 +100,21 @@ DIR/W /S /P /F /N /B /A /C /SU /H
                             wide, size, prot, full, no header, brief,
                             allocation, cluster, summary, header
 PLEASE message              send to the operator console (KB0:)
-PLEASE/LI                   (priv/console) list the PLEASE queue
-PLEASE/RE job text          (priv/console) reply to that job
-QUE [filespec]              print queue; QUE/DE n  QUE/LI  QUMRUN
+PLEASE/LI                   (privileged or console) list the PLEASE queue
+PLEASE/RE job text          (privileged or console) reply to that job
+QUE [filespec]              print queue; QUE/LI  QUMRUN
+QUE/DE n                    delete your job; others (privileged)
 BACKUP [filespec] [MT0:]    copy files to a magtape image (also BCK)
 BACKUP/RE [MT0:]            restore from that image
 SUBMIT filespec             run a command file as a detached job
 QUOLST                      disk and job quota for this account
-CCL name=filespec           (priv) install a keyboard command
-CCL /DE name                remove; CCL lists them
-SHUTUP                      (priv) halt the system
-UTILITY                     (priv) REACT, DSKINT, CCL, SHUTUP
+QUOLST [p,pn]               (privileged) another account's quotas
+QUOLST/SET  QUOLST/JOB      (privileged) set disk or job quota
+CCL                         list installed keyboard commands
+CCL name=filespec           (privileged) install a keyboard command
+CCL /DE name                (privileged) remove it
+SHUTUP                      (privileged) halt the system
+UTILITY                     (privileged) REACT, DSKINT, CCL, SHUTUP
 KILL filespec               delete a file
 UNSAVE filespec             delete a file
 NAME old AS new             rename
@@ -116,14 +123,18 @@ DEASSIGN [logical]          drop one name, or all if omitted
 SET WIDTH n / ECHO / NOECHO / SCOPE / TAB / FORM / FILL n / GAG / SPEED n / TYPE name
                             terminal (TTYSET)
 NAME old AS new<prot>       rename and/or set protection
+NAME old AS new<232>        (privileged) set the privilege bit
 SYSTAT / SYS / WHO          jobs (RSTS columns)
-ATTACH / DETACH             reconnect a detached job
-FORCE kb: command           (priv) type a line at another job
-HANGUP job                  (priv, or your PK: child)
-BROADCAST / SEND            message to a keyboard
+ATTACH / DETACH             reconnect a detached job you own
+                            (privileged: anyone's detached job)
+FORCE kb: command           (privileged) type a line at another job
+HANGUP job                  (privileged, or your PK: child)
+BROADCAST ALL text          (privileged) message every keyboard
+SEND kb: text               message one job
 SHOW CPU / HARDWARE         PDP-11/70 configuration
 SYSTAT/D / SHOW DISKS       mounted disk packs
-MOUNT / DISMOUNT / DSKINT   private and public packs
+MOUNT / DISMOUNT            private packs; /PUBLIC (privileged)
+DSKINT                      (privileged) initialize a pack
 DATE / TIME                 clock
 
 Filespecs:  NAME.EXT  [p,pn]NAME.EXT  SY:[p,pn]NAME.EXT  $NAME
@@ -142,6 +153,7 @@ SAVE [name]         write .BAS, or .PAS if the program in memory is Pascal
 REPLACE [name]      save, overwriting
 COMPILE [name]      compile .BAS to .BAC, or .PAS to .PAC  (default <124>)
 COMPILE name<prot>  compile with an explicit protection code
+COMPILE name<232>   (privileged) compiled with the privilege bit
 LIST [n[-m]]        list BASIC lines, or the Pascal source in memory
 RUN [name]          run (.BAC, .PAC, .BAS, .PAS if a name is given)
 RUN name.ext        that file only
@@ -179,6 +191,8 @@ resume a program after RENUM.
   GOTO  GOSUB  RETURN  ON ... GOTO/GOSUB
   IF ... THEN ... ELSE
   FOR ... TO ... STEP / NEXT
+  FOR v=x WHILE cond / NEXT
+  FOR v=x UNTIL cond / NEXT
   WHILE ... / NEXT   UNTIL ... / NEXT
   DEF FNx = expr        one line
   DEF FNx(a,b) ... FNEND    many lines, FNEXIT returns early
@@ -190,7 +204,8 @@ resume a program after RENUM.
                             [, MODE n] [, CLUSTERSIZE n] [, FILESIZE n]
   OPEN ... AS FILE #n, ORGANIZATION VIRTUAL
   OPEN "PK:" AS FILE n      spawn a job on a pseudo keyboard
-  OPEN "KB:" AS FILE n      this terminal, KBn: another one (priv)
+  OPEN "KB:" AS FILE n      this terminal
+  OPEN "KBn:" AS FILE n     a keyboard at Bye (any user); logged-in (privileged)
   OPEN "LP:" AS FILE n      the printer, spooled to LPn.LST then QUE
   OPEN "NL:" AS FILE n      the null device
   OPEN "MT:" AS FILE n      magtape image (disk/MT0, 512-byte records)
@@ -198,11 +213,15 @@ resume a program after RENUM.
   OPEN "DX:"/"DT:"          floppy / DECtape images
   MAP (name) LONG X%, STRING A$ = n
   GET #n [, RECORD n]   PUT #n [, RECORD n]   UNLOCK #n
+                            GET/PUT of KB:/TT:/PK: with RECORDSIZE 1
+                            is one character; WAIT times that GET out
   FIELD #n, n AS A$   LSET / RSET
   CLOSE #n  RANDOMIZE  DEF FNx = ...
   ON ERROR GOTO n / 0   RESUME [NEXT | n]
   CHAIN filespec [LINE n]   COMMON A, B$(n)   SLEEP seconds
-  WAIT seconds          timeout on the next INPUT (error 15)
+  WAIT seconds          timeout on the next INPUT or GET of a
+                            keyboard/PK (error 15). WAIT 0 polls.
+  INPUT LINE            same as LINE INPUT
   IF END #n THEN ...    true when the next read would be at EOF
   MID$(A$,i,n)=B$       replace n characters of A$ starting at i
   EXTEND / NOEXTEND     default NOEXTEND: names are 1 character
@@ -223,14 +242,23 @@ Statement modifiers (rightmost is outermost):
   statement WHILE cond
   statement UNTIL cond
   statement FOR v=a TO b [STEP s]
+  statement FOR v=a WHILE cond [STEP s]
+  statement FOR v=a UNTIL cond [STEP s]
 
 Several statements on one line are separated by \
 Integer divide is also \  (inside an expression)
 Relational true is -1, false is 0
+Logical: NOT AND OR XOR EQV IMP (16-bit bitwise)
+== is approximately equal (same as printed)
+** is the same as ^
+LET A,B=n  sets every name
+A trailing & continues the line
+Strings may use "..." or '...'
+Integer variables (%) are stored as integers
 `,
 	"FN": `Numeric: ABS INT FIX SGN SQR SIN COS TAN ATN LOG EXP RND PI ERR ERL
          PEEK SWAP% TIME DATE
-String:  LEN LEFT$ RIGHT$ MID$ INSTR CHR$ ASC STR$ VAL NUM1$ NUM$
+String:  LEN LEFT$ RIGHT$ MID$ INSTR CHR$ ASC ASCII STR$ VAL NUM1$ NUM$
          SPACE$ STRING$ DATE$ TIME$ TAB SPC POS SYS
          CVT%$ CVT$% CVTF$ CVT$F CVT$$ XLATE XLATE$
          RAD$ SPEC%
@@ -243,8 +271,11 @@ NUM  NUM2        rows and columns, set by MAT INPUT
 
 DATE / DATE(0)   integer date  (year-1970)*1000 + yearday
 TIME / TIME(0)   seconds since midnight (KW11-L 60 Hz clock)
-TIME(1)          CPU seconds this job has used (waits are not charged)
+TIME(1)          CPU time this job has used, in tenths of a second
+TIME(2)          minutes this job has been connected
+TIME(3)          kilo-core-ticks (TIME(1) times job size in K-words)
 DATE$ / TIME$    printable date and time
+ASCII(s)         same as ASC (first character)
 PEEK(addr)       16-bit word at even byte address (monitor / I/O page)
 SWAP%(n)         swap bytes of a 16-bit word (T%(11%)+SWAP%(T%(12%)))
 RIGHT$(s,n)      from character n to the end (BASIC-PLUS, not last-n)
@@ -255,8 +286,11 @@ SYS(CHR$(n)+...): 1=system, 2=PPN, 3=job, 4=program, 5=date,
      14=SY0:  -1=hangup  -2=echo  -5=assign  -6=deassign
      -8=KB unit  -9=date$  -3=UU.TB1  -12=UU.TB2
      -10=UU.TRM (width/echo)  -11=extra TRM (speed/type)
-     -13=job CPU/size  -14=disable logins  -15=enable logins
-     -16=send/broadcast  -17=directory lookup
+     -13=job CPU/size  -14=disable logins (privileged)
+     -15=enable logins (privileged)
+     -16=send/broadcast (ALL is privileged)
+     -17=directory lookup  -18=CCL command tail
+     -20=directory scan  -22=job  -23=pack  -36=copy/kill/rename
      -7=Ctrl-C trap (CHR$(1%) enable, CHR$(0%) disable)
      other FIP subcodes return zeros
   7=time, 9=pack SY
@@ -301,6 +335,31 @@ SYS(CHR$(6%)+CHR$(-3%)) returns the monitor table: after CHANGE TO T%,
 
 Type SHOW CPU  or  OLD CPU  then RUN.
 `,
+	"SWITCH": `SWITCH changes the job's run-time system. On V7.2 the usual pair was
+BASIC-PLUS (keyboard monitor at Ready) and RSX (MCR, RUN of .TSK).
+
+  SWITCH              print the current RTS
+  SWITCH BASIC        Ready, .BAS / .BAC (default)
+  SWITCH RSX          MCR prompt >, RUN looks for .TSK
+  SWITCH RT11         not installed
+
+This system does not execute MACRO-11 tasks. RUN of a .TSK under RSX is
+?Can't find file or account, or ?Not a task if the file exists. PIP and
+the other BASIC CUSPs need SWITCH BASIC. SYSTAT/R lists BASIC and RSX.
+`,
+	"INIT": `INIT is the console dialogue before timesharing, the way INIT.SYS was
+used at boot. The first interactive start on a disk, or rsts --init,
+prompts:
+
+  Option: START     begin timesharing (Bye)
+  Option: DSKINT    initialize a pack
+  Option: DEFAULT   maximum jobs (1-63)
+  Option: LIST      hardware
+  Option: EXIT      halt without starting
+
+Telnet and serial wait until START. Later boots skip INIT unless
+--init is given. --guest and --login skip INIT.
+`,
 	"TELNET": `This system is multi-user. Each Telnet connection and each
 serial line is a RSTS job on its own KB: line (KB0: is the console).
 
@@ -323,6 +382,7 @@ Connect with any Telnet client. Terminal type VT52 is the baseline
   telnet host 23
 
 At the Bye prompt:  HELLO  then account and password.
+SYSTAT (SYS, WHO) is legal at Bye with no login.
 BYE logs out. EXIT or QUIT at Bye stops the emulator on the console
 (a Telnet EXIT hangs up that line only).
 Ctrl-C interrupts a running program; Ctrl-U kills the input line.
@@ -368,16 +428,17 @@ then set serial = "/tmp/tty1" and talk to /tmp/tty2.
   SYSTAT/D                  disk packs (device, pack ID, Pub/Pri)
   SYS                       same as SYSTAT
   WHO                       logged-in jobs only
+  SWITCH [BASIC|RSX]        job run-time system
   DETACH                    detach this job from the keyboard
   HELLO/DETACH              log in and detach (keyboard returns to Bye)
   ATTACH n                  attach to a detached job you own
                             (privileged: anyone's detached job)
-  FORCE kb: command         inject a command (privileged)
-  HANGUP n                  hang up a job/line (privileged)
-  BROADCAST ALL text        message every keyboard (privileged)
+  FORCE kb: command         (privileged) inject a command
+  HANGUP n                  (privileged, or your PK: child)
+  BROADCAST ALL text        (privileged) message every keyboard
   SEND kb: text             message one job
-  SHUTUP                    (priv) halt every job and the listener
-  UTILITY                   (priv) REACT, DSKINT, CCL, SHUTUP
+  SHUTUP                    (privileged) halt every job and the listener
+  UTILITY                   (privileged) REACT, DSKINT, CCL, SHUTUP
 
 SET GAG drops BROADCAST ALL on this keyboard.
 
@@ -386,11 +447,14 @@ Where is KBn: or PKn: (pseudo keyboard).
 
 OPEN "PK:" AS FILE n  assigns a PK unit and forks a new job at #.
 PRINT #n sends keystrokes; INPUT #n / LINE INPUT #n reads the job's
-output. CLOSE #n hangs up the spawned job.
+output. GET #n / PUT #n with RECORDSIZE 1 are one character (WAIT
+times GET out). CLOSE #n hangs up the spawned job.
 
-  10 OPEN "PK:" AS FILE 1
-  20 PRINT #1, "HELLO GUEST"
-  30 PRINT #1, "GUEST"
+OPEN "KBn:" AS FILE n  takes a keyboard that is sitting at Bye.
+PRINT # / LINE INPUT # / GET # / PUT # are that serial or Telnet
+line until CLOSE; the login job on KBn: waits. A logged-in keyboard
+needs privilege. A guest MITM is OPEN KBn: (free), OPEN PK:, and
+GET/PUT both ways (WAIT 0 polls). OLD MITM then RUN.
 `,
 	"DISKS": `RSTS/E V7.2 disk packs (UMOUNT). A pack sits on a physical unit
 and is logically mounted before you can store files on it.
@@ -419,8 +483,8 @@ Devices on this 11/70:
 
   MOUNT device: packid [/PRIVATE] [/PUBLIC] [/WRITE] [/RONLY]
   DISMOUNT device: [packid]
-  DSKINT device: packid [/PUBLIC]     (priv) initialize a pack
-  INITIALIZE device: packid [/PUBLIC]
+  DSKINT device: packid [/PUBLIC]     (privileged) initialize a pack
+  INITIALIZE device: packid [/PUBLIC] (privileged)
   SYSTAT/D
   SHOW DISKS
 
@@ -432,7 +496,7 @@ Examples:
   DSKINT DL0: WORK      put a new pack on an empty unit
   MOUNT DL0: WORK
 
-/PUBLIC requires privilege (adds the pack to the public structure).
+/PUBLIC (privileged) adds the pack to the public structure.
 Ordinary users mount private packs. SY0:/DB0: cannot be dismounted.
 Pack IDs are 1-6 letters or digits. Once mounted, PAYROL: is a
 logical name for that unit.
@@ -446,7 +510,7 @@ A sample pack PAYROL is initialized on DB1: and left unmounted.
 
 Character devices besides disk:
 
-  KB: TT:   this job's terminal (KBn: another one)
+  KB: TT:   this job's terminal; KBn: at Bye is OPEN-able
   LP:       line printer, spooled then drained by QUMRUN to LP0
   NL:       null
   MT: MM: MS:  magtape image  disk/MT0  (512-byte records; BACKUP)
@@ -482,7 +546,8 @@ attached:  SYSTAT/D  is the same as  SYSTAT /D.
   SYSTAT/D            disks (packs, pack ID, Pub/Pri)
   SYSTAT/K  /T        keyboards / terminals
   SYSTAT/M            memory
-  SYSTAT/R            run-time systems
+  SYSTAT/R            run-time systems (BASIC and RSX)
+  SYSTAT/S            system statistics
   SYSTAT/S            system statistics
   SYSTAT/B            busy devices
   SYSTAT/H            hardware
@@ -517,7 +582,7 @@ aliases for the same displays:
   SHOW STATUS    SYSTAT/S
   SHOW CPU       hardware
   SHOW ACCOUNT   this PPN
-  SHOW ACCOUNTS  (priv) all PPNs
+  SHOW ACCOUNTS  (privileged) all PPNs
   SHOW DATE      DATE
   SHOW TIME      TIME
 `,
@@ -527,21 +592,30 @@ and attached switches work: SYSTAT/D, DISMOU DB1:, HLP DISK.
   HELLO  BYE  PASSWORD
   EXIT  QUIT              at Bye, stop the emulator
   DIR  CAT  TYPE  COPY  PIP  KILL  UNSAVE  NAME
-  PLEASE  QUE  QUMRUN  CCL  SUBMIT  QUOLST  BACKUP  BCK
+  PLEASE  QUE  QUMRUN  SUBMIT  QUOLST  BACKUP  BCK  CCL
   ASSIGN  DEASSIGN
   NEW  OLD  SAVE  REPLACE  COMPILE  LIST  LISTNH  RUN  RUNNH  CONT
   EDIT  VTEDIT  RENUM  RENUMBER  DELETE  CLEAR  SET  TTYSET
-  SYSTAT  SYS  WHO
-  MOUNT  DISMOUNT  DSKINT  UMOUNT
-  ATTACH  DETACH  FORCE  HANGUP  BROADCAST  SEND
-  SHUTUP  UTILITY
+  SYSTAT  SYS  WHO  SWITCH
+  MOUNT  DISMOUNT  UMOUNT
+  ATTACH  DETACH  SEND
   DATE  TIME  DAYTIME
-  CREATE  DELETE/ACCOUNT  REACT
   SHOW  HELP
   CPU  HARDWARE
 
+  CCL name=filespec  CCL/DE   (privileged)
+  DSKINT                      (privileged)
+  FORCE  BROADCAST ALL        (privileged)
+  HANGUP                      (privileged, or your PK: child)
+  SHUTUP  UTILITY             (privileged)
+  CREATE  DELETE/ACCOUNT  REACT  (privileged)
+  SHOW ACCOUNTS               (privileged)
+  PASSWORD [p,pn]             (privileged)
+  QUOLST/SET  QUOLST/JOB      (privileged)
+  PLEASE/LI  PLEASE/RE        (privileged or console)
+
 Type HELP topic. Topics: LOGIN FILES BASIC LANG PASCAL FN COMMANDS SYSTAT
-SHOW DISKS ACCOUNTS COMPILE HARDWARE TELNET JOBS SET QUE CCL QUOLST
+SHOW DISKS ACCOUNTS COMPILE HARDWARE SWITCH INIT TELNET JOBS SET QUE CCL QUOLST
 PLEASE
 `,
 	"HELP": `Help can be obtained on a topic by typing:
@@ -554,7 +628,8 @@ prefix. Attached switches are ignored (HELP SYSTAT/D = HELP SYSTAT).
 
 Additional help is available on:
   LOGIN FILES BASIC LANG PASCAL FN COMMANDS SYSTAT SHOW DISKS
-  ACCOUNTS COMPILE HARDWARE TELNET JOBS SET QUE CCL QUOLST PLEASE HELP
+  ACCOUNTS COMPILE HARDWARE SWITCH INIT TELNET JOBS SET QUE CCL QUOLST
+  PLEASE HELP
 `,
 	"PLEASE": `PLEASE sends a message to the operator console (KB0:). Messages
 are queued in please.json under the disk root even if no console is
@@ -562,8 +637,8 @@ attached.
 
   PLEASE text               send a message
   PLEASE                    prompt for the message
-  PLEASE/LI                 list the queue (privileged or console)
-  PLEASE/RE job text        reply to that job (privileged or console)
+  PLEASE/LI                 (privileged or console) list the queue
+  PLEASE/RE job text        (privileged or console) reply to that job
   OPR                       the same command
 
 The operator sees:
@@ -577,7 +652,7 @@ the queue onto the host printer file LP0 under the disk root.
 
   QUE filespec     queue a file for LP:
   QUE  QUE/LI      list the queue
-  QUE/DE n         delete entry n (your jobs, or all if privileged)
+  QUE/DE n         delete your job; others (privileged)
   QUMRUN           show the spooler and the queue
 
 SUBMIT (also BATCH) runs a command file as a detached job: each line
@@ -587,14 +662,14 @@ is typed at Ready the way you would type it, and the keyboard is free.
   BATCH filespec
 `,
 	"QUOLST": `QUOLST shows the disk and logged-in job quotas for this account.
-Privileged users may give a PPN or name, and may set the limits.
+QUOLST [p,pn] and setting the limits are (privileged).
 
   QUOLST
-  QUOLST [p,pn]
-  QUOLST/SET [p,pn] n     (priv) disk block quota (0 = unlimited)
-  QUOLST/JOB [p,pn] n     (priv) logged-in job quota
-  REACT QUOTA [p,pn] n
-  REACT JOBQUOTA [p,pn] n
+  QUOLST [p,pn]           (privileged) another account
+  QUOLST/SET [p,pn] n     (privileged) disk block quota (0 = unlimited)
+  QUOLST/JOB [p,pn] n     (privileged) logged-in job quota
+  REACT QUOTA [p,pn] n    (privileged)
+  REACT JOBQUOTA [p,pn] n (privileged)
 
 A Quota is the block limit for that PPN. Zero means no limit. Writing
 a file that would go over it is error 4, ?No room for user on device,
@@ -603,12 +678,17 @@ logged in at once (zero means no limit).
 `,
 	"CCL": `CCL installs a program as a keyboard command, the way UTILITY did.
 
-  CCL name=filespec     (priv)  RUN that program when name is typed
-  CCL/DE name           (priv)  remove it
+  CCL name=filespec     (privileged)  RUN that program when name is typed
+  CCL/DE name           (privileged)  remove it
   CCL                   list installed commands
 
-Unique prefixes work. Built-in commands always win, so you cannot
-replace DIR or SYSTAT. The program is RUN as if you had typed RUN filespec.
+PIP, DIR, SYSTAT, QUE, PLEASE, BACKUP, SUBMIT, QUOLST, UTILITY, TTYSET
+and CCL itself are BASIC-PLUS programs in [1,2] (TYPE SYSTAT.BAS).
+Unique prefixes of those names RUN the CUSP. Additional CCL names must
+not collide with a built-in command.
+
+The command tail is SYS(CHR$(6%)+CHR$(-18%)). Directory, jobs and packs
+are FIP -20 / -22 / -23; copy/delete/rename is FIP -36.
 `,
 	"PASCAL": `PASCAL is ISO 7185:1990 / ANSI/IEEE 770X3.97-1983 Level 1, the
 Jensen and Wirth language. Programs are type-checked and compiled to a
@@ -627,6 +707,7 @@ source from a .PAC.
   COMPILE filespec      .BAS to .BAC, .PAS to .PAC
   COMPILE name          .BAS, then .PAS, else the program in memory
   COMPILE name<prot>    same, with protection  (default <124>)
+  COMPILE name<232>     (privileged) compiled with the privilege bit
   RUN [name]            .BAC, then .PAC, then .BAS, then .PAS
   RUN name.ext          that file only
 
@@ -722,17 +803,17 @@ RUN interprets that bytecode. LIST and TYPE cannot recover the source.
                           or ProgramName.PAC from Pascal memory
   COMPILE PAYROL          .BAS then .PAS, else memory, to .BAC / .PAC
   COMPILE PAYROL.PAS      that file only, to PAYROL.PAC
-  COMPILE PAYROL<232>     with protection 232 (privileged)
+  COMPILE PAYROL<232>     (privileged) with protection 232
 
 Protection bits (V7.2):
   64   compiled / executable
   128  privileged program (only with 64)
 
-Only a privileged account ([1,*], or SYSTEM) may set bit 128.
+Only a [1,*] account may set bit 128.
 Typical public privileged CUSP protection is <232>.
 
-NAME old.BAC AS old.BAC<232>   set the privilege bit after COMPILE
-PIP dest<232>=src              copy with a new protection
+NAME old.BAC AS old.BAC<232>   (privileged) set the privilege bit after COMPILE
+PIP dest<232>=src              (privileged) copy with privilege bit 128
 
 RUN of a .BAC or .PAC with bits 64+128 gives the job temporary
 privilege (JFSYS): same PPN, extra rights for the duration of the run.
@@ -743,30 +824,31 @@ is destroyed so a non-privileged user cannot LIST it.
 Non-privileged users may RUN a public <232> file but cannot OLD,
 TYPE, or LIST it.
 
-  RUN $WHOAMI     demo: guest runs a privileged CUSP in [1,2]
+  RUN [1,9]WHOAMI   demo: guest runs a privileged compiled program in [1,9]
 `,
 	"ACCOUNTS": `Default accounts (name or PPN, then password):
 
-  SYSTEM    1,2        SYSTEM     (privileged)
+  SYSTEM    1,2        SYSTEM     (system library)
+  LIBRARY   1,9        LIBRARY    (stock programs)
   GUEST     100,100    GUEST
   DEMO      200,200    DEMO
 
-On V7.2, project [1,*] is privileged. Account work is done by a
+On V7.2, every [1,pn] account is privileged. Account work is done by a
 privileged user (REACT on a real system):
 
-  CREATE [p,pn] NAME n PASSWORD pw
-  CREATE/ACCOUNT [p,pn] n pw
-  DELETE/ACCOUNT [p,pn]
-  REMOVE [p,pn]
+  CREATE [p,pn] NAME n PASSWORD pw     (privileged)
+  CREATE/ACCOUNT [p,pn] n pw           (privileged)
+  DELETE/ACCOUNT [p,pn]                (privileged)
+  REMOVE [p,pn]                        (privileged)
   PASSWORD                  change your own (old + new)
-  PASSWORD [p,pn] [new]     (priv) set that account's password
-  SHOW ACCOUNTS             (priv) list PPNs and names
-  REACT CREATE / DELETE / PASSWORD / LIST
-  REACT QUOTA [p,pn] n      disk block quota (0 = unlimited)
-  REACT JOBQUOTA [p,pn] n   logged-in job quota
-  QUOLST/SET [p,pn] n
+  PASSWORD [p,pn] [new]     (privileged) set that account's password
+  SHOW ACCOUNTS             (privileged) list PPNs and names
+  REACT CREATE / DELETE / PASSWORD / LIST   (privileged)
+  REACT QUOTA [p,pn] n      (privileged) disk block quota (0 = unlimited)
+  REACT JOBQUOTA [p,pn] n   (privileged) logged-in job quota
+  QUOLST/SET [p,pn] n       (privileged)
 
-CREATE of [1,*] is privileged. [1,2] cannot be deleted.
+CREATE of [1,*] is privileged. [1,2] and [1,9] cannot be deleted.
 An account that is logged in cannot be deleted.
 
 RUN of a <232> .BAC or .PAC gives a normal user temporary privilege for
@@ -1035,6 +1117,17 @@ func (t *stdTerm) ReadLine(prompt string) (string, error) {
 	return strings.TrimRight(line, "\r\n"), nil
 }
 
+func (t *stdTerm) GetByte(wait time.Duration) (byte, error) {
+	if wait == 0 && t.in.Buffered() == 0 {
+		return 0, errWaitTimeout
+	}
+	b, err := t.in.ReadByte()
+	if err == io.EOF {
+		return 0, io.EOF
+	}
+	return b, err
+}
+
 func (t *stdTerm) ReadPassword(prompt string) (string, error) {
 	fd := int(os.Stdin.Fd())
 	if t.out == os.Stdout && term.IsTerminal(fd) {
@@ -1081,6 +1174,8 @@ type Shell struct {
 	console    bool
 	pascalOn   bool
 	pascalSrc  string
+	rts        string
+	cclArg     string
 }
 
 func NewShell(diskRoot string, login string, guest bool) (*Shell, error) {
@@ -1177,6 +1272,7 @@ func (sys *System) newSession(job *Job, out io.Writer, term terminal) *Shell {
 			}
 			return s.sys.Broadcast(to, from+" "+s.KB, text)
 		},
+		FipExtra: s.fipExtra,
 		SetLogins: func(off bool) error {
 			if s.sys == nil {
 				return nil
@@ -1195,7 +1291,22 @@ func (sys *System) newSession(job *Job, out io.Writer, term terminal) *Shell {
 
 func (s *Shell) seedSamples() error {
 	seeds := loadSeeds(s.Disk.Root)
+	sets := map[string]map[string]string{}
 	for ppn, files := range samples {
+		sets[ppn] = files
+	}
+	lib := libraryCUSPFiles()
+	if sets["1,2"] != nil && len(lib) > 0 {
+		merged := map[string]string{}
+		for k, v := range sets["1,2"] {
+			merged[k] = v
+		}
+		for k, v := range lib {
+			merged[k] = v
+		}
+		sets["1,2"] = merged
+	}
+	for ppn, files := range sets {
 		parts := strings.SplitN(ppn, ",", 2)
 		proj, _ := strconv.Atoi(parts[0])
 		prog, _ := strconv.Atoi(parts[1])
@@ -1203,7 +1314,8 @@ func (s *Shell) seedSamples() error {
 		if err != nil {
 			return err
 		}
-		for name, content := range files {
+		for _, name := range seedWriteOrder(files) {
+			content := files[name]
 			path := filepath.Join(folder, name)
 			spec, err := ParseFileSpec(fmt.Sprintf("[%d,%d]%s", proj, prog, name), "")
 			if err != nil {
@@ -1218,8 +1330,13 @@ func (s *Shell) seedSamples() error {
 					return err
 				}
 				body = wrapPcode(img)
-				prot = privCompiledProt
-			case strings.HasSuffix(strings.ToUpper(name), ".TXT") && proj == 1 && prog == 2:
+				base := strings.TrimSuffix(strings.ToUpper(name), ".BAC")
+				if isLibraryCUSP(base) {
+					prot = publicCompiledProt
+				} else {
+					prot = privCompiledProt
+				}
+			case strings.HasSuffix(strings.ToUpper(name), ".TXT") && isLibraryPPN(proj, prog):
 				prot = 40
 			}
 			if !seeds.replaces(path, body, proj, prog) {
@@ -1234,10 +1351,105 @@ func (s *Shell) seedSamples() error {
 			seeds.record(path, body)
 		}
 	}
+	s.retireMovedLibraryFiles()
+	if err := s.compileStaleLibraryImages(); err != nil {
+		return err
+	}
 	if err := seeds.save(s.Disk.Root); err != nil {
 		return err
 	}
 	return nil
+}
+
+func seedWriteOrder(files map[string]string) []string {
+	names := make([]string, 0, len(files))
+	for name := range files {
+		names = append(names, name)
+	}
+	sort.Slice(names, func(i, j int) bool {
+		iBac := strings.HasSuffix(strings.ToUpper(names[i]), ".BAC")
+		jBac := strings.HasSuffix(strings.ToUpper(names[j]), ".BAC")
+		if iBac != jBac {
+			return !iBac
+		}
+		return names[i] < names[j]
+	})
+	return names
+}
+
+// compileStaleLibraryImages COMPILEs a CUSP when its .BAS is newer than
+// its .BAC (or the .BAC is missing). [1,9] demos stay source except WHOAMI.
+func (s *Shell) compileStaleLibraryImages() error {
+	if s == nil || s.Disk == nil {
+		return nil
+	}
+	for _, name := range libraryCUSPNames() {
+		if err := s.compileIfBasNewer(1, 2, name, publicCompiledProt); err != nil {
+			return err
+		}
+	}
+	return s.compileIfBasNewer(1, 9, "WHOAMI", privCompiledProt)
+}
+
+func libraryCUSPNames() []string {
+	var names []string
+	for name := range libraryCUSPFiles() {
+		upper := strings.ToUpper(name)
+		if strings.HasSuffix(upper, ".BAS") {
+			names = append(names, strings.TrimSuffix(upper, ".BAS"))
+		}
+	}
+	sort.Strings(names)
+	return names
+}
+
+func (s *Shell) compileIfBasNewer(proj, prog int, name string, prot int) error {
+	folder, err := s.Disk.AccountDir(proj, prog)
+	if err != nil {
+		return err
+	}
+	basPath := filepath.Join(folder, name+".BAS")
+	bacPath := filepath.Join(folder, name+".BAC")
+	basInfo, err := os.Stat(basPath)
+	if err != nil {
+		return nil
+	}
+	if bacInfo, err := os.Stat(bacPath); err == nil && !basInfo.ModTime().After(bacInfo.ModTime()) {
+		return nil
+	}
+	src, err := os.ReadFile(basPath)
+	if err != nil {
+		return err
+	}
+	img, err := compileSourceText(string(src))
+	if err != nil {
+		return err
+	}
+	spec, err := ParseFileSpec(fmt.Sprintf("[%d,%d]%s.BAC", proj, prog, name), "")
+	if err != nil {
+		return err
+	}
+	return s.Disk.WriteText(spec, proj, prog, true, wrapPcode(img), prot)
+}
+
+// Demos that used to live on [1,2] now seed onto [1,9]. Drop the old
+// copies so an upgraded disk does not keep COMP/DATA/WHOAMI in the
+// system library.
+func (s *Shell) retireMovedLibraryFiles() {
+	if s == nil || s.Disk == nil {
+		return
+	}
+	for name := range samples["1,9"] {
+		upper := strings.ToUpper(name)
+		if !strings.HasSuffix(upper, ".BAS") && !strings.HasSuffix(upper, ".BAC") && !strings.HasSuffix(upper, ".DAT") {
+			continue
+		}
+		spec, err := ParseFileSpec("[1,2]"+name, "")
+		if err != nil {
+			continue
+		}
+		_ = s.Disk.Delete(spec, 1, 2, true)
+	}
 }
 
 func (s *Shell) write(text string, newline bool) {
@@ -1452,6 +1664,11 @@ func (s *Shell) openDiskFile(m *Machine, channel int, spec FileSpec, mode string
 		closeChanFile(old)
 	}
 	m.Files[channel] = cf
+	if spec.ProtSet && (mode == "OUTPUT" || mode == "APPEND") {
+		if err := s.Disk.SetProt(spec, s.Account.Proj, s.Account.Prog, s.priv(), spec.Prot); err != nil {
+			return err
+		}
+	}
 	return nil
 }
 
@@ -1492,14 +1709,18 @@ func (s *Shell) Run() int {
 				fmt.Fprintf(s.out, "\n^C\n")
 				if s.Account != nil {
 					fmt.Fprintln(s.out)
-					fmt.Fprintln(s.out, "Ready")
+					if s.jobRTS() != "RSX" {
+						fmt.Fprintln(s.out, "Ready")
+					}
 				}
 				continue
 			}
 			fmt.Fprintf(s.out, "\n^C\n")
 			if s.Account != nil {
 				fmt.Fprintln(s.out)
-				fmt.Fprintln(s.out, "Ready")
+				if s.jobRTS() != "RSX" {
+					fmt.Fprintln(s.out, "Ready")
+				}
 			}
 		}
 	}
@@ -1510,13 +1731,30 @@ func (s *Shell) oneTurn() error {
 	if s.Account == nil {
 		return s.loggedOut()
 	}
+	if s.jobRTS() == "RSX" {
+		return s.rsxTurn()
+	}
 	return s.ready()
 }
 
+func (s *Shell) waitIfAssigned() bool {
+	if s.sys == nil || !s.sys.kbAssigned(s.KB) {
+		return false
+	}
+	s.sys.waitKBReleased(s.KB)
+	return true
+}
+
 func (s *Shell) loggedOut() error {
+	if s.waitIfAssigned() {
+		return nil
+	}
 	fmt.Fprintln(s.out)
 	fmt.Fprintln(s.out, "Bye")
 	line, err := s.readLine("")
+	if s.waitIfAssigned() {
+		return nil
+	}
 	if err != nil {
 		return err
 	}
@@ -1530,6 +1768,10 @@ func (s *Shell) loggedOut() error {
 		s.cmdHello(rest)
 	case "HELP", "HLP":
 		s.cmdHelp(rest)
+	case "SYSTAT", "SYS":
+		s.cmdSystat(rest)
+	case "WHO":
+		s.cmdSystat("/U " + rest)
 	case "EXIT", "QUIT":
 		s.cmdHalt()
 	case "BYE", "LOGOUT":
@@ -1543,9 +1785,15 @@ func (s *Shell) loggedOut() error {
 }
 
 func (s *Shell) ready() error {
+	if s.waitIfAssigned() {
+		return nil
+	}
 	fmt.Fprintln(s.out)
 	fmt.Fprintln(s.out, "Ready")
 	line, err := s.readLine("")
+	if s.waitIfAssigned() {
+		return nil
+	}
 	if err != nil {
 		return err
 	}
@@ -1560,6 +1808,10 @@ func (s *Shell) Dispatch(raw string) {
 	}
 	stripped := strings.TrimLeft(line, " \t")
 	if stripped != "" && unicode.IsDigit(rune(stripped[0])) {
+		if s.jobRTS() == "RSX" {
+			fmt.Fprintln(s.out, "?Wrong RTS")
+			return
+		}
 		s.storeProgramLine(stripped)
 		return
 	}
@@ -1588,31 +1840,31 @@ func (s *Shell) dispatchCmd(verb, rest string) error {
 	case "HELP", "HLP":
 		s.cmdHelp(rest)
 	case "DIR", "CAT", "CATALOG":
-		return s.cmdDir(rest)
+		return s.runLibraryCUSP("DIR", rest)
 	case "TYPE":
 		return s.cmdType(rest)
 	case "COPY":
 		return s.cmdCopy(rest)
 	case "PIP":
-		return s.cmdPip(rest)
+		return s.runLibraryCUSP("PIP", rest)
 	case "PLEASE", "OPR":
-		return s.cmdPlease(rest)
+		return s.runLibraryCUSP("PLEASE", rest)
 	case "QUE":
-		return s.cmdQue(rest)
+		return s.runLibraryCUSP("QUE", rest)
 	case "QUMRUN":
-		return s.cmdQumrun(rest)
+		return s.runLibraryCUSP("QUMRUN", rest)
 	case "BACKUP", "BCK":
-		return s.cmdBackup(rest)
+		return s.runLibraryCUSP("BACKUP", rest)
 	case "SUBMIT", "BATCH":
-		return s.cmdSubmit(rest)
+		return s.runLibraryCUSP("SUBMIT", rest)
 	case "QUOLST", "QUOTA":
-		return s.cmdQuolst(rest)
+		return s.runLibraryCUSP("QUOLST", rest)
 	case "SHUTUP":
 		return s.cmdShutup(rest)
 	case "UTILITY":
-		return s.cmdUtility(rest)
+		return s.runLibraryCUSP("UTILITY", rest)
 	case "CCL":
-		return s.cmdCCL(rest)
+		return s.runLibraryCUSP("CCL", rest)
 	case "KILL", "UNSAVE":
 		return s.cmdKill(rest)
 	case "NAME":
@@ -1656,11 +1908,13 @@ func (s *Shell) dispatchCmd(verb, rest string) error {
 	case "CLEAR":
 		s.Basic.resetRuntime()
 	case "SYSTAT", "SYS":
-		s.cmdSystat(rest)
+		return s.runLibraryCUSP("SYSTAT", rest)
 	case "SYSTAT/D", "SYS/D":
-		s.cmdDisks()
+		return s.runLibraryCUSP("SYSTAT", "/D")
 	case "WHO":
-		s.cmdSystat("/U " + rest)
+		return s.runLibraryCUSP("WHO", rest)
+	case "SWITCH":
+		return s.cmdSwitch(rest)
 	case "MOUNT":
 		return s.cmdMount(rest)
 	case "DISMOUNT", "DISMOU":
@@ -1707,8 +1961,10 @@ func (s *Shell) dispatchCmd(verb, rest string) error {
 		s.cmdShow(rest)
 	case "CONT", "CONTINUE":
 		s.cmdCont()
-	case "SET", "TTYSET":
+	case "SET":
 		return s.cmdSet(rest)
+	case "TTYSET":
+		return s.runLibraryCUSP("TTYSET", rest)
 	case "ASSIGN":
 		return s.cmdAssign(rest)
 	case "DEASSIGN":
@@ -1759,6 +2015,7 @@ var keyboardCmds = []string{
 	"PASSWORD", "CREATE", "REACT", "ACCOUNT", "SHOW", "REMOVE",
 	"CONT", "SET", "TTYSET", "ASSIGN", "DEASSIGN",
 	"BACKUP", "BCK",
+	"SWITCH",
 	"RENUM", "RENUMBER", "RESEQ", "RESEQUENCE",
 	"EDIT", "VTEDIT",
 }
@@ -1772,7 +2029,6 @@ var cmdSynonym = map[string]string{
 	"LOGOUT":     "BYE",
 	"CATALOG":    "CAT",
 	"CONTINUE":   "CONT",
-	"TTYSET":     "SET",
 	"BATCH":      "SUBMIT",
 	"QUOTA":      "QUOLST",
 	"BCK":        "BACKUP",
@@ -2291,6 +2547,11 @@ func (s *Shell) syncJob() {
 	}
 	j.Who = who
 	j.What = what
+	if s.rts != "" {
+		j.RTS = s.rts
+	} else {
+		j.RTS = "BASIC"
+	}
 	j.SizeK = minJobKW
 	if s.Basic != nil {
 		j.SizeK = s.Basic.SizeKW()
@@ -2334,6 +2595,7 @@ func (s *Shell) cmdBye(rest string) {
 	fmt.Fprintf(s.out, "Job %d  User %s  logged off %s  at %s  %s\n\n",
 		s.Job, s.Account.PPN(), s.KB, NowDate(), NowTime())
 	s.leavePascal()
+	s.rts = "BASIC"
 	s.Basic.ClearProgram("NONAME")
 	s.tempPriv = false
 	if s.Basic != nil {
@@ -2364,6 +2626,10 @@ func (s *Shell) cmdBye(rest string) {
 }
 
 func (s *Shell) cmdHelp(rest string) {
+	if s.jobRTS() == "RSX" {
+		s.cmdHelpRSX(rest)
+		return
+	}
 	topic := strings.ToUpper(strings.TrimSpace(rest))
 	if i := strings.IndexByte(topic, '/'); i >= 0 {
 		topic = topic[:i]
@@ -2408,7 +2674,7 @@ func (s *Shell) cmdHelp(rest string) {
 var helpAlias = map[string]string{
 	"DISK": "DISKS", "DEVICE": "DISKS", "DEVICES": "DISKS",
 	"PACK": "DISKS", "PACKS": "DISKS", "MOUNT": "DISKS", "DISMOUNT": "DISKS",
-	"DSKINT": "DISKS", "UMOUNT": "DISKS", "INITIALIZE": "DISKS", "INIT": "DISKS",
+	"DSKINT": "DISKS", "UMOUNT": "DISKS", "INITIALIZE": "DISKS",
 	"ASSIGN": "DISKS", "DEASSIGN": "DISKS", "REASSIGN": "DISKS",
 	"CONT": "BASIC", "CONTINUE": "BASIC",
 	"RENUM": "BASIC", "RENUMBER": "BASIC", "RESEQ": "BASIC",
@@ -2417,7 +2683,9 @@ var helpAlias = map[string]string{
 	"TTY": "SERIAL", "RS232": "SERIAL", "MODEM": "SERIAL", "PORT": "SERIAL",
 	"CCL": "CCL", "KEYBOARD": "JOBS", "KEYBOARDS": "JOBS",
 	"CMDS": "COMMANDS", "DCL": "COMMANDS",
-	"CPU": "HARDWARE", "PDP": "HARDWARE", "PDP11": "HARDWARE", "SWITCH": "HARDWARE",
+	"CPU": "HARDWARE", "PDP": "HARDWARE", "PDP11": "HARDWARE",
+	"SWITCH": "SWITCH", "RTS": "SWITCH", "RSX": "SWITCH",
+	"INIT": "INIT", "HARDWR": "INIT",
 	"HLP":       "HELP",
 	"DIRECTORY": "FILES", "DIR": "FILES", "CAT": "FILES", "CATALOG": "FILES",
 	"TYPE": "FILES", "PIP": "FILES", "COPY": "FILES", "KILL": "FILES",
@@ -2431,7 +2699,7 @@ var helpAlias = map[string]string{
 	"PASCAL": "PASCAL", "OMSI": "PASCAL",
 	"ATTACH": "JOBS", "DETACH": "JOBS", "FORCE": "JOBS", "HANGUP": "JOBS",
 	"BROADCAST": "JOBS", "SEND": "JOBS", "TALK": "JOBS", "PK": "JOBS",
-	"RT11": "SYSTAT", "RSX": "SYSTAT", "RTS": "SYSTAT",
+	"RT11": "SWITCH",
 	"DATE": "COMMANDS", "TIME": "COMMANDS", "DAYTIME": "COMMANDS",
 	"ADVANCED": "LANG", "STATEMENTS": "LANG", "FUNCTIONS": "FN",
 	"PLEASE": "PLEASE", "OPR": "PLEASE",
@@ -2453,7 +2721,7 @@ func uniqueStrings(in []string) []string {
 }
 
 func (s *Shell) accountPriv() bool {
-	return s.Account != nil && (s.Account.Privileged || s.Account.Proj == 1)
+	return s.Account.HasPrivilege()
 }
 
 func (s *Shell) priv() bool {
@@ -3298,10 +3566,18 @@ func (s *Shell) compilePascalMemory(name string) error {
 }
 
 func (s *Shell) cmdRun(rest string, heading bool) {
+	if s.jobRTS() == "RSX" {
+		s.runRSX(rest)
+		return
+	}
 	if strings.TrimSpace(rest) != "" {
 		spec, err := s.parseSpec(rest, "")
 		if err != nil {
 			fmt.Fprintf(s.out, "?%s\n", strings.TrimPrefix(err.Error(), "?"))
+			return
+		}
+		if spec.ExtGiven && spec.Ext == "TSK" {
+			fmt.Fprintln(s.out, "?SWITCH to RSX")
 			return
 		}
 		file, err := s.resolveRunFile(spec)
@@ -3811,7 +4087,7 @@ func (s *Shell) cmdDeleteAccount(rest string) error {
 	if target == nil {
 		return fsErr("Can't find file or account")
 	}
-	if target.Proj == 1 && target.Prog == 2 {
+	if isLibraryPPN(target.Proj, target.Prog) {
 		return fsErr("Protection violation")
 	}
 	if s.Account != nil && s.Account.Proj == target.Proj && s.Account.Prog == target.Prog {
@@ -3862,7 +4138,7 @@ func (s *Shell) cmdShowAccounts() error {
 	fmt.Fprintln(s.out, "  PPN       Name      Priv")
 	for _, a := range accts {
 		priv := ""
-		if a.Privileged || a.Proj == 1 {
+		if a.HasPrivilege() {
 			priv = "Priv"
 		}
 		fmt.Fprintf(s.out, "[%3d,%3d]  %-9s %s\n", a.Proj, a.Prog, a.Name, priv)
@@ -3876,7 +4152,7 @@ func (s *Shell) cmdAccount() error {
 		return err
 	}
 	fmt.Fprintf(s.out, "%s  %s\n", acct.Display(), acct.Name)
-	if acct.Privileged {
+	if acct.HasPrivilege() {
 		fmt.Fprintln(s.out, "Privileged")
 	}
 	return nil
@@ -4089,6 +4365,22 @@ func parseLineRange(text string) (start, end int, hasStart, hasEnd bool) {
 
 // Main is the rsts command: flags, config.toml, then the console and
 // optional Telnet/serial lines. Returns a process exit status.
+func runConsoleINIT(sys *System) bool {
+	st := &stdTerm{in: bufio.NewReader(os.Stdin), out: os.Stdout}
+	sh := &Shell{
+		sys:      sys,
+		term:     st,
+		Disk:     sys.Disk,
+		out:      os.Stdout,
+		console:  true,
+		forceCh:  make(chan string, 8),
+		echo:     true,
+		width:    80,
+		logicals: map[string]string{},
+	}
+	return sh.runINIT()
+}
+
 func Main(args []string) int {
 	envDisk := os.Getenv("RSTS_DISK")
 	diskFlag := ""
@@ -4098,6 +4390,7 @@ func Main(args []string) int {
 	portOverride := -1
 	noConsole := false
 	noTelnet := false
+	forceInit := false
 	for i := 0; i < len(args); i++ {
 		switch args[i] {
 		case "--disk":
@@ -4129,6 +4422,8 @@ func Main(args []string) int {
 			noConsole = true
 		case "--no-telnet":
 			noTelnet = true
+		case "--init":
+			forceInit = true
 		case "--version":
 			fmt.Printf("%s  (%s)\n", SystemName, CPUName)
 			return 0
@@ -4142,6 +4437,7 @@ Usage: rsts [options]
   --port N        override telnet_port
   --guest         log in the console as GUEST
   --login NAME    prompt for that account's password
+  --init          INIT dialogue on the console (before timesharing)
   --no-console    Telnet only
   --no-telnet     local console only
   --version       print version
@@ -4196,6 +4492,14 @@ config.toml keys (defaults and unused stay commented in the file):
 		return 1
 	}
 	_ = cfgPath
+	if shouldRunINIT(sys, forceInit, guest, login, cfg.Console) {
+		if !runConsoleINIT(sys) {
+			sys.Close()
+			return 0
+		}
+	} else if guest || login != "" {
+		sys.markTimesharing()
+	}
 	telnetOK := false
 	if cfg.Telnet {
 		addr, err := sys.StartTelnet()

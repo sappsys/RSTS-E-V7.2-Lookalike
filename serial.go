@@ -182,6 +182,54 @@ func (t *serialTerm) ReadLine(prompt string) (string, error) {
 	return t.readEdit(prompt, t.echoOn())
 }
 
+func (t *serialTerm) GetByte(wait time.Duration) (byte, error) {
+	t.mu.Lock()
+	if len(t.pending) > 0 {
+		b := t.pending[0]
+		t.pending = t.pending[1:]
+		t.mu.Unlock()
+		return b, nil
+	}
+	t.mu.Unlock()
+	if wait == 0 {
+		var buf [1]byte
+		n, err := pollRead(t.f, buf[:])
+		if n > 0 {
+			if t.skipNL {
+				t.skipNL = false
+				if buf[0] == '\n' || buf[0] == 0 {
+					return t.GetByte(0)
+				}
+			}
+			return buf[0], nil
+		}
+		_ = err
+		return 0, errWaitTimeout
+	}
+	if wait > 0 {
+		_ = t.f.SetReadDeadline(time.Now().Add(wait))
+		defer t.f.SetReadDeadline(time.Time{})
+	}
+	var buf [1]byte
+	n, err := t.f.Read(buf[:])
+	if n > 0 {
+		if t.skipNL {
+			t.skipNL = false
+			if buf[0] == '\n' || buf[0] == 0 {
+				return t.GetByte(wait)
+			}
+		}
+		return buf[0], nil
+	}
+	if err != nil {
+		if os.IsTimeout(err) {
+			return 0, errWaitTimeout
+		}
+		return 0, err
+	}
+	return 0, errWaitTimeout
+}
+
 func (t *serialTerm) ReadPassword(prompt string) (string, error) {
 	s, err := t.readEdit(prompt, false)
 	if _, werr := t.Write([]byte("\r\n")); werr != nil && err == nil {

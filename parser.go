@@ -96,12 +96,13 @@ type branch struct {
 }
 
 type modifier struct {
-	kind   string // IF UNLESS WHILE UNTIL FOR
-	cond   expr
-	forVar string
-	start  expr
-	end    expr
-	step   expr
+	kind    string // IF UNLESS WHILE UNTIL FOR
+	cond    expr
+	forVar  string
+	forCond string
+	start   expr
+	end     expr
+	step    expr
 }
 
 type fieldItem struct {
@@ -141,6 +142,7 @@ type stmt struct {
 	thenPart  *branch
 	elsePart  *branch
 	forVar    string
+	forCond   string // "", "WHILE", or "UNTIL" (FOR without TO)
 	start     expr
 	end       expr
 	step      expr
@@ -564,6 +566,9 @@ func (p *parser) parseInput() (stmt, error) {
 	if err := p.expectKw("INPUT"); err != nil {
 		return stmt{}, err
 	}
+	if p.acceptKw("LINE") {
+		return p.parseLineInputBody()
+	}
 	s := stmt{kind: stInput}
 	if p.acceptKind(tokHash) {
 		ch, err := p.parseExpr()
@@ -605,6 +610,10 @@ func (p *parser) parseLineInput() (stmt, error) {
 	if err := p.expectKw("INPUT"); err != nil {
 		return stmt{}, err
 	}
+	return p.parseLineInputBody()
+}
+
+func (p *parser) parseLineInputBody() (stmt, error) {
 	s := stmt{kind: stLineInput}
 	if p.acceptKind(tokHash) {
 		ch, err := p.parseExpr()
@@ -631,6 +640,14 @@ func (p *parser) parseAssignment() (stmt, error) {
 	if err != nil {
 		return stmt{}, err
 	}
+	var extra []*varRef
+	for p.acceptKind(tokComma) {
+		v2, err := p.parseVarRef()
+		if err != nil {
+			return stmt{}, err
+		}
+		extra = append(extra, v2)
+	}
 	if err := p.expectOp("="); err != nil {
 		return stmt{}, err
 	}
@@ -638,7 +655,7 @@ func (p *parser) parseAssignment() (stmt, error) {
 	if err != nil {
 		return stmt{}, err
 	}
-	return stmt{kind: stLet, target: v, expr: e}, nil
+	return stmt{kind: stLet, target: v, expr: e, targets: extra}, nil
 }
 
 func (p *parser) parseMidAssign() (stmt, error) {
@@ -751,14 +768,14 @@ func (p *parser) parseBranch(stopElse bool) (*branch, error) {
 			break
 		}
 		if p.tok().kind == tokBackslash || p.tok().kind == tokColon {
-			break
+			p.i++
+			continue
 		}
 		st, err := p.parseStatement()
 		if err != nil {
 			return nil, err
 		}
 		stmts = append(stmts, st)
-		break
 	}
 	return &branch{stmts: stmts}, nil
 }
@@ -778,22 +795,47 @@ func (p *parser) parseFor() (stmt, error) {
 	if err != nil {
 		return stmt{}, err
 	}
-	if err := p.expectKw("TO"); err != nil {
+	s := stmt{kind: stFor, forVar: name, start: start}
+	if err := p.parseForBound(&s.end, &s.cond, &s.forCond, &s.step); err != nil {
 		return stmt{}, err
-	}
-	end, err := p.parseExpr()
-	if err != nil {
-		return stmt{}, err
-	}
-	s := stmt{kind: stFor, forVar: name, start: start, end: end}
-	if p.acceptKw("STEP") {
-		step, err := p.parseExpr()
-		if err != nil {
-			return stmt{}, err
-		}
-		s.step = step
 	}
 	return s, nil
+}
+
+// parseForBound reads TO y [STEP z], or WHILE/UNTIL expr [STEP z].
+func (p *parser) parseForBound(end *expr, cond *expr, kind *string, step *expr) error {
+	switch {
+	case p.acceptKw("TO"):
+		e, err := p.parseExpr()
+		if err != nil {
+			return err
+		}
+		*end = e
+	case p.acceptKw("WHILE"):
+		e, err := p.parseExpr()
+		if err != nil {
+			return err
+		}
+		*cond = e
+		*kind = "WHILE"
+	case p.acceptKw("UNTIL"):
+		e, err := p.parseExpr()
+		if err != nil {
+			return err
+		}
+		*cond = e
+		*kind = "UNTIL"
+	default:
+		return basicErr("Syntax error")
+	}
+	if p.acceptKw("STEP") {
+		e, err := p.parseExpr()
+		if err != nil {
+			return err
+		}
+		*step = e
+	}
+	return nil
 }
 
 func (p *parser) parseNext() (stmt, error) {
@@ -1265,14 +1307,26 @@ func (p *parser) parseOr() (expr, error) {
 	if err != nil {
 		return nil, err
 	}
-	for p.acceptKw("OR") {
+	for {
+		op := ""
+		switch {
+		case p.acceptKw("OR"):
+			op = "OR"
+		case p.acceptKw("XOR"):
+			op = "XOR"
+		case p.acceptKw("EQV"):
+			op = "EQV"
+		case p.acceptKw("IMP"):
+			op = "IMP"
+		default:
+			return left, nil
+		}
 		right, err := p.parseAnd()
 		if err != nil {
 			return nil, err
 		}
-		left = binExpr{op: "OR", l: left, r: right}
+		left = binExpr{op: op, l: left, r: right}
 	}
-	return left, nil
 }
 
 func (p *parser) parseAnd() (expr, error) {
@@ -1309,7 +1363,7 @@ func (p *parser) parseRel() (expr, error) {
 	for p.tok().kind == tokOp {
 		op := p.tok().text
 		switch op {
-		case "=", "<>", "<", ">", "<=", ">=":
+		case "=", "<>", "<", ">", "<=", ">=", "==":
 			p.i++
 			right, err := p.parseAdd()
 			if err != nil {
@@ -1539,22 +1593,10 @@ func (p *parser) parseModifiers(s *stmt) error {
 			if err != nil {
 				return err
 			}
-			if err := p.expectKw("TO"); err != nil {
-				return err
-			}
-			end, err := p.parseExpr()
-			if err != nil {
-				return err
-			}
 			mod.forVar = name
 			mod.start = start
-			mod.end = end
-			if p.acceptKw("STEP") {
-				step, err := p.parseExpr()
-				if err != nil {
-					return err
-				}
-				mod.step = step
+			if err := p.parseForBound(&mod.end, &mod.cond, &mod.forCond, &mod.step); err != nil {
+				return err
 			}
 		}
 		s.mods = append(s.mods, mod)

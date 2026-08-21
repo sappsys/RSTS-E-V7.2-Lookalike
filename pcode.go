@@ -101,6 +101,11 @@ const (
 	opMidSet
 	opScale
 	opRestoreAt
+	opXor
+	opEqv
+	opImp
+	opApprox
+	opDup
 )
 
 const (

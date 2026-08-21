@@ -49,10 +49,9 @@ func (s seeds) replaces(path, body string, proj, prog int) bool {
 		s.record(path, body)
 		return false
 	}
-	// [1,2] holds the notice, the CUSPs and the exerciser. Those are
-	// supplied by the system and track the release, so an older disk
-	// picks up a newer set.
-	if proj == 1 && prog == 2 {
+	// [1,2] CUSPs and notice, and [1,9] stock programs, track the
+	// release: an older disk picks up the copy this binary seeds.
+	if isLibraryPPN(proj, prog) {
 		return true
 	}
 	key := filepath.Base(filepath.Dir(path)) + "/" + filepath.Base(path)

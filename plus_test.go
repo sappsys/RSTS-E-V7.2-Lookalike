@@ -236,10 +236,10 @@ func TestVirtualMap(t *testing.T) {
 }
 
 func TestComp(t *testing.T) {
-	if samples["100,100"]["COMP.BAS"] != "" {
-		t.Error("COMP.BAS belongs to [1,2] only")
+	if samples["100,100"]["COMP.BAS"] != "" || samples["1,2"]["COMP.BAS"] != "" {
+		t.Error("COMP.BAS belongs to [1,9] only")
 	}
-	src := samples["1,2"]["COMP.BAS"]
+	src := samples["1,9"]["COMP.BAS"]
 	if src == "" {
 		t.Fatal("missing COMP.BAS sample")
 	}
@@ -384,7 +384,7 @@ func TestCompWithoutChainTarget(t *testing.T) {
 			return os.Rename(filepath.Join(dir, old), filepath.Join(dir, new))
 		},
 	})
-	if err := m.LoadSource(samples["1,2"]["COMP.BAS"], "COMP"); err != nil {
+	if err := m.LoadSource(samples["1,9"]["COMP.BAS"], "COMP"); err != nil {
 		t.Fatal(err)
 	}
 	if err := m.RunProgram(); err != nil {
@@ -404,7 +404,7 @@ func TestCompRenumThroughShell(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	sh.Login("SYSTEM", "SYSTEM")
+	sh.Login("LIBRARY", "LIBRARY")
 	var out strings.Builder
 	sh.out = &out
 	sh.Dispatch("OLD COMP")
@@ -429,5 +429,45 @@ func TestCompRenumThroughShell(t *testing.T) {
 	}
 	if !strings.Contains(got, "ALL PASSED") {
 		t.Fatalf("comp after shell RENUM did not pass:\n%s", got)
+	}
+}
+
+func TestBasicPlusV7Operators(t *testing.T) {
+	out := runProgram(t, "10 PRINT 6% XOR 3%\n20 PRINT 1% EQV 1%\n30 PRINT 2**3\n40 PRINT ASCII(\"A\")\n50 A,B=9\n60 PRINT A;B\n70 PRINT 'HI'\n80 END\n")
+	if !strings.Contains(out, "5") {
+		t.Fatalf("xor: %q", out)
+	}
+	if !strings.Contains(out, "-1") {
+		t.Fatalf("eqv: %q", out)
+	}
+	if !strings.Contains(out, "8") {
+		t.Fatalf("pow: %q", out)
+	}
+	if !strings.Contains(out, "65") {
+		t.Fatalf("ascii: %q", out)
+	}
+	if !strings.Contains(out, "9") {
+		t.Fatalf("let multi: %q", out)
+	}
+	if !strings.Contains(out, "HI") {
+		t.Fatalf("quotes: %q", out)
+	}
+}
+
+func TestForUntilNoTo(t *testing.T) {
+	out := runProgram(t, "10 S=0\n20 FOR I=1 UNTIL I>3\n30 S=S+I\n40 NEXT I\n50 PRINT S;I\n60 END\n")
+	if !strings.Contains(out, "6") {
+		t.Fatalf("sum: %q", out)
+	}
+	out = runProgram(t, "10 K=0\n20 K=K+1 FOR I=1 WHILE I<=4\n30 PRINT K\n40 END\n")
+	if !strings.Contains(out, "4") {
+		t.Fatalf("mod while: %q", out)
+	}
+}
+
+func TestTimeTenthsAndKCT(t *testing.T) {
+	out := runProgram(t, "10 FOR I=1 TO 200\n20 X=X+SQR(I)\n30 NEXT I\n40 T=TIME(1)\n50 K=TIME(3)\n60 PRINT T;K\n70 END\n")
+	if strings.TrimSpace(out) == "" {
+		t.Fatalf("empty: %q", out)
 	}
 }

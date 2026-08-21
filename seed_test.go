@@ -5,6 +5,7 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+	"time"
 )
 
 func newSystemIn(t *testing.T, root string) *System {
@@ -33,6 +34,7 @@ func TestSeedsEmptyDirectory(t *testing.T) {
 	sys := newSystemIn(t, root)
 
 	wantAccount(t, sys.Accounts, "SYSTEM", 1, 2)
+	wantAccount(t, sys.Accounts, "LIBRARY", 1, 9)
 	wantAccount(t, sys.Accounts, "GUEST", 100, 100)
 	wantAccount(t, sys.Accounts, "DEMO", 200, 200)
 
@@ -40,6 +42,9 @@ func TestSeedsEmptyDirectory(t *testing.T) {
 		"accounts.json",
 		"packs.json",
 		filepath.Join("SY", "1,2", "NOTICE.TXT"),
+		filepath.Join("SY", "1,2", "PIP.BAC"),
+		filepath.Join("SY", "1,9", "COMP.BAS"),
+		filepath.Join("SY", "1,9", "WHOAMI.BAC"),
 		filepath.Join("SY", "100,100", "HELLO.BAS"),
 		filepath.Join("SY", "200,200", "SIEVE.BAS"),
 	} {
@@ -50,12 +55,19 @@ func TestSeedsEmptyDirectory(t *testing.T) {
 	if len(sys.Disk.Packs()) == 0 {
 		t.Error("no packs after seed")
 	}
+	if _, err := os.Stat(filepath.Join(root, "SY", "1,2", "COMP.BAS")); err == nil {
+		t.Error("COMP.BAS should not be seeded in [1,2]")
+	}
+	if _, err := os.Stat(filepath.Join(root, "SY", "1,9", "COMP.BAC")); err == nil {
+		t.Error("COMP.BAS should not be compiled")
+	}
 }
 
 func TestSeedsNestedMissingDirectory(t *testing.T) {
 	root := filepath.Join(t.TempDir(), "no", "such", "place", "disk")
 	sys := newSystemIn(t, root)
 	wantAccount(t, sys.Accounts, "SYSTEM", 1, 2)
+	wantAccount(t, sys.Accounts, "LIBRARY", 1, 9)
 }
 
 func TestRebuildsDamagedAccountsFile(t *testing.T) {
@@ -112,9 +124,13 @@ func TestRestoresMissingSystemAccount(t *testing.T) {
 
 	sys := newSystemIn(t, root)
 	wantAccount(t, sys.Accounts, "SYSTEM", 1, 2)
+	wantAccount(t, sys.Accounts, "LIBRARY", 1, 9)
 	wantAccount(t, sys.Accounts, "DEMO", 200, 200)
 	if a := sys.Accounts.Find("SYSTEM"); a == nil || !a.Privileged {
 		t.Fatal("restored [1,2] should be privileged")
+	}
+	if a := sys.Accounts.Find("LIBRARY"); a == nil || !a.Privileged {
+		t.Fatal("restored [1,9] should be privileged")
 	}
 	if a := sys.Accounts.Find("GUEST"); a != nil {
 		t.Fatal("a deliberately deleted GUEST should stay deleted")
@@ -123,6 +139,7 @@ func TestRestoresMissingSystemAccount(t *testing.T) {
 	// The restored account must survive on disk, not just in memory.
 	again := newSystemIn(t, root)
 	wantAccount(t, again.Accounts, "SYSTEM", 1, 2)
+	wantAccount(t, again.Accounts, "LIBRARY", 1, 9)
 }
 
 // An old disk must pick up a newer exerciser, notice or CUSP.
@@ -130,7 +147,7 @@ func TestRefreshesStaleSystemSample(t *testing.T) {
 	root := filepath.Join(t.TempDir(), "disk")
 	newSystemIn(t, root)
 
-	path := filepath.Join(root, "SY", "1,2", "COMP.BAS")
+	path := filepath.Join(root, "SY", "1,9", "COMP.BAS")
 	if err := os.WriteFile(path, []byte("10 PRINT \"OLD RELEASE\"\n20 END\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
@@ -140,8 +157,11 @@ func TestRefreshesStaleSystemSample(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if string(got) != samples["1,2"]["COMP.BAS"] {
+	if string(got) != samples["1,9"]["COMP.BAS"] {
 		t.Fatalf("stale system sample was not refreshed:\n%s", got)
+	}
+	if _, err := os.Stat(filepath.Join(root, "SY", "1,2", "COMP.BAS")); err == nil {
+		t.Fatal("COMP.BAS should not remain in [1,2]")
 	}
 }
 
@@ -221,6 +241,9 @@ func TestRepairsDeletedAccountDirectories(t *testing.T) {
 	if err := os.RemoveAll(filepath.Join(root, "SY", "1,2")); err != nil {
 		t.Fatal(err)
 	}
+	if err := os.RemoveAll(filepath.Join(root, "SY", "1,9")); err != nil {
+		t.Fatal(err)
+	}
 	if err := os.RemoveAll(filepath.Join(root, "DB1")); err != nil {
 		t.Fatal(err)
 	}
@@ -228,11 +251,145 @@ func TestRepairsDeletedAccountDirectories(t *testing.T) {
 	newSystemIn(t, root)
 	for _, path := range []string{
 		filepath.Join("SY", "1,2", "NOTICE.TXT"),
-		filepath.Join("SY", "1,2", "WHOAMI.BAC"),
+		filepath.Join("SY", "1,2", "PIP.BAC"),
+		filepath.Join("SY", "1,9", "WHOAMI.BAC"),
+		filepath.Join("SY", "1,9", "COMP.BAS"),
 		"DB1",
 	} {
 		if _, err := os.Stat(filepath.Join(root, path)); err != nil {
 			t.Errorf("not repaired: %s (%v)", path, err)
 		}
+	}
+}
+
+// An old disk that still has COMP/DATA/WHOAMI in [1,2] loses those
+// copies once they seed onto [1,9].
+func TestRetiresMovedLibraryFiles(t *testing.T) {
+	root := filepath.Join(t.TempDir(), "disk")
+	newSystemIn(t, root)
+
+	old := filepath.Join(root, "SY", "1,2", "COMP.BAS")
+	if err := os.WriteFile(old, []byte("10 PRINT \"STALE\"\n20 END\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	newSystemIn(t, root)
+	if _, err := os.Stat(old); err == nil {
+		t.Fatal("COMP.BAS should have left [1,2]")
+	}
+	got, err := os.ReadFile(filepath.Join(root, "SY", "1,9", "COMP.BAS"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(got) != samples["1,9"]["COMP.BAS"] {
+		t.Fatal("COMP.BAS was not seeded onto [1,9]")
+	}
+	if _, err := os.Stat(filepath.Join(root, "SY", "1,2", "PIP.BAC")); err != nil {
+		t.Fatal("PIP.BAC should stay in [1,2]")
+	}
+}
+
+func TestProjectOnePrivilegeCannotBeCleared(t *testing.T) {
+	root := filepath.Join(t.TempDir(), "disk")
+	newSystemIn(t, root)
+
+	path := filepath.Join(root, "accounts.json")
+	keep := accountFile{Accounts: []Account{
+		{Proj: 1, Prog: 2, Name: "SYSTEM", Password: "SYSTEM"},
+		{Proj: 1, Prog: 4, Name: "OPR", Password: "SECRET"},
+		{Proj: 1, Prog: 9, Name: "LIBRARY", Password: "LIBRARY"},
+	}}
+	data, err := json.Marshal(keep)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(path, data, 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	sys := newSystemIn(t, root)
+	for _, ppn := range [][2]int{{1, 2}, {1, 4}, {1, 9}} {
+		a := sys.Accounts.FindPPN(ppn[0], ppn[1])
+		if a == nil || !a.HasPrivilege() || !a.Privileged {
+			t.Fatalf("[%d,%d] must be privileged after load", ppn[0], ppn[1])
+		}
+	}
+}
+
+func TestRefreshesStaleCUSP(t *testing.T) {
+	root := filepath.Join(t.TempDir(), "disk")
+	newSystemIn(t, root)
+
+	old := "10 PRINT \"OLD CUSP\"\n20 END\n"
+	bas := filepath.Join(root, "SY", "1,2", "PIP.BAS")
+	bac := filepath.Join(root, "SY", "1,2", "PIP.BAC")
+	if err := os.WriteFile(bas, []byte(old), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	img, err := compileSourceText(old)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(bac, []byte(wrapPcode(img)), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	newSystemIn(t, root)
+	got, err := os.ReadFile(bas)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := libraryCUSPFiles()["PIP.BAS"]
+	if string(got) != want {
+		t.Fatal("stale CUSP .BAS was not re-seeded")
+	}
+	got, err = os.ReadFile(bac)
+	if err != nil {
+		t.Fatal(err)
+	}
+	fresh, err := compileSourceText(want)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(got) != wrapPcode(fresh) {
+		t.Fatal("stale CUSP .BAC was not re-seeded")
+	}
+}
+
+func TestCompilesCUSPWhenBasNewer(t *testing.T) {
+	root := filepath.Join(t.TempDir(), "disk")
+	newSystemIn(t, root)
+
+	bas := filepath.Join(root, "SY", "1,2", "PIP.BAS")
+	bac := filepath.Join(root, "SY", "1,2", "PIP.BAC")
+	now := time.Now()
+	if err := os.Chtimes(bac, now.Add(-2*time.Hour), now.Add(-2*time.Hour)); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chtimes(bas, now.Add(-time.Hour), now.Add(-time.Hour)); err != nil {
+		t.Fatal(err)
+	}
+
+	newSystemIn(t, root)
+	info, err := os.Stat(bac)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !info.ModTime().After(now.Add(-90 * time.Minute)) {
+		t.Fatalf("PIP.BAC was not recompiled from newer PIP.BAS; mtime %s", info.ModTime())
+	}
+}
+
+func TestDoesNotCompileLibraryDemos(t *testing.T) {
+	root := filepath.Join(t.TempDir(), "disk")
+	newSystemIn(t, root)
+	if _, err := os.Stat(filepath.Join(root, "SY", "1,9", "COMP.BAC")); err == nil {
+		t.Fatal("COMP.BAS should not be compiled")
+	}
+	if _, err := os.Stat(filepath.Join(root, "SY", "1,9", "DATA.BAC")); err == nil {
+		t.Fatal("DATA.BAS should not be compiled")
+	}
+	if _, err := os.Stat(filepath.Join(root, "SY", "1,9", "WHOAMI.BAC")); err != nil {
+		t.Fatal("WHOAMI.BAC should be compiled")
 	}
 }

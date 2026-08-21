@@ -1,0 +1,8 @@
+Library account [1,9]. @@LONG@@.
+Password is LIBRARY.
+
+RUN COMP   BASIC-PLUS exerciser for this release: every statement
+           and function the language implements. Self-checking.
+           Prints ALL PASSED.
+RUN DATA   1000-record virtual file demo.
+RUN WHOAMI privileged compiled program demo.

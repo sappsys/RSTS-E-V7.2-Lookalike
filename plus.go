@@ -99,10 +99,6 @@ func (m *Machine) execMods(s stmt, mi int) (jump, error) {
 		if err != nil {
 			return jump{}, err
 		}
-		end, err := m.evalNum(mod.end)
-		if err != nil {
-			return jump{}, err
-		}
 		step := 1.0
 		if mod.step != nil {
 			step, err = m.evalNum(mod.step)
@@ -111,6 +107,35 @@ func (m *Machine) execMods(s stmt, mi int) (jump, error) {
 			}
 		}
 		m.setVar(mod.forVar, numValue(start))
+		if mod.forCond != "" {
+			for n := 0; n < 1000000; n++ {
+				cv, err := m.eval(mod.cond)
+				if err != nil {
+					return jump{}, err
+				}
+				t := m.truth(cv)
+				if mod.forCond == "UNTIL" && t {
+					return jump{}, nil
+				}
+				if mod.forCond == "WHILE" && !t {
+					return jump{}, nil
+				}
+				j, err := m.execMods(s, mi-1)
+				if err != nil || j.kind != jumpNone {
+					return j, err
+				}
+				cur, err := m.numVal(m.getVar(mod.forVar))
+				if err != nil {
+					return jump{}, err
+				}
+				m.setVar(mod.forVar, numValue(cur+step))
+			}
+			return jump{}, m.err("Too many iterations")
+		}
+		end, err := m.evalNum(mod.end)
+		if err != nil {
+			return jump{}, err
+		}
 		for n := 0; n < 1000000; n++ {
 			cur, err := m.numVal(m.getVar(mod.forVar))
 			if err != nil {
@@ -413,6 +438,9 @@ func (m *Machine) doGet(s stmt) error {
 	if err != nil {
 		return err
 	}
+	if f.pk != nil || f.dev != nil {
+		return m.doGetChar(f)
+	}
 	if f.file == nil {
 		return m.err("I/O error")
 	}
@@ -460,6 +488,9 @@ func (m *Machine) doPut(s stmt) error {
 	f, _, err := m.channel(s)
 	if err != nil {
 		return err
+	}
+	if f.pk != nil || f.dev != nil {
+		return m.doPutChar(f)
 	}
 	if f.file == nil {
 		return m.err("I/O error")

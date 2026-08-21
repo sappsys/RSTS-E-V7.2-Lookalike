@@ -139,11 +139,16 @@ func (s *Shell) runCCL(verb, rest string) bool {
 	if s.sys == nil || s.Account == nil {
 		return false
 	}
+	if s.jobRTS() == "RSX" {
+		fmt.Fprintln(s.out, "?Wrong RTS")
+		return true
+	}
 	e, ok := s.sys.lookupCCL(verb)
 	if !ok {
 		return false
 	}
-	_ = rest
-	s.cmdRun(e.Spec, true)
+	s.cclArg = rest
+	s.Basic.IO.CCLLine = rest
+	s.cmdRun(e.Spec, false)
 	return true
 }

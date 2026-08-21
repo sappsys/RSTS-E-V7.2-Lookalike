@@ -6,9 +6,67 @@ Newest first.
 The system portrayed is RSTS/E V7.2 on a PDP-11/70, and that does not
 change. DEC numbered the update level after the dash -- V7.2-10 was a
 real one -- and this project uses that number for its own releases. So
-V7.2-10 is the first release here, V7.2-11 the second, V7.2-12 this
-one, and the emulator identifies itself with whichever it is built
-from: SYS(CHR$(1)) and the login banner both report it.
+V7.2-10 is the first release here, V7.2-11 the second, V7.2-12 the
+third, V7.2-13 this one, and the emulator identifies itself with
+whichever it is built from: SYS(CHR$(1)) and the login banner both
+report it.
+
+
+V7.2-13   21-Aug-2026
+---------------------
+
+Fourth tagged release.
+https://github.com/sappsys/RSTS-E-V7.2-Lookalike/releases/tag/V7.2-13
+
+  SYSTAT, SYS and WHO are legal at Bye with no login.
+
+  INIT is the console dialogue before timesharing (START, DSKINT,
+  DEFAULT, LIST). The first interactive boot on a disk, or rsts --init,
+  runs it; --guest and --login skip it. Telnet waits until START.
+
+  SWITCH BASIC / SWITCH RSX is the V7.2 pair of run-time systems.
+  RSX uses an MCR prompt and RUN of .TSK (this system does not execute
+  MACRO-11 tasks). SYSTAT/R lists BASIC and RSX, not a fake RT11.
+
+  PIP, DIRECT (DIR/CAT), SYSTAT, QUE, QUMRUN, PLEASE, BACKUP, SUBMIT,
+  QUOLST, UTILITY, TTYSET and CCL are BASIC-PLUS CUSPs in [1,2]
+  (TYPE SYSTAT.BAS). They parse the command tail (SYS 6,-18) and
+  print; FIP dumps the directory, jobs or packs in one SYS
+  (not a call per file). PIP uses OPEN, KILL and NAME. DIRECT
+  keeps /CLUSTER in its own variable so a plain DIR still prints
+  size, protection, date and time. RIGHT$ is Digital (from character n),
+  so numeric columns pad with SPACE$+value, matching DIR and SYSTAT.
+
+  IF THEN stmt \ stmt applies to the rest of the line, as BASIC-PLUS
+  does (not only the first statement).
+
+  [1,9] LIBRARY is a standard account at init, like [1,2]. Non-CUSP
+  stock programs (COMP.BAS, DATA.BAS, WHOAMI.BAS/.BAC) live there.
+  [1,2] holds NOTICE.TXT, LOGIN.TXT and the library CUSPs only.
+  Every [1,pn] account is privileged, as on V7.
+
+  CUSPs in [1,2] are re-seeded when they differ from this binary.
+  If a CUSP .BAS is newer than its .BAC, the .BAS is compiled.
+  [1,9] demos stay source except WHOAMI.BAC.
+
+  Seeded programs are files, not Go strings: cusps/ → [1,2] CUSPs,
+  demos/ → [1,9], samples/<ppn>/ → that account.
+
+  GET and PUT of KB:, TT: and PK: with RECORDSIZE 1 are one character,
+  as on V7.2. WAIT times that GET out (WAIT 0 polls, error 15).
+  OPEN of KBn: at Bye takes that keyboard: GET/PUT on the channel,
+  the login job parks until CLOSE. Telnet WAIT 0 and Ctrl-C poll the
+  socket instead of a zero deadline, so a relay can steal KB0: and
+  still ^C out of itself. Guest [100,100] has MITM.BAS (character
+  tap of KB0: through PK:). SLEEP with the programmable trap reports
+  error 28, so ON ERROR can CLOSE and END.
+
+  XOR, EQV and IMP are 16-bit bitwise; == is approximately equal;
+  ** is ^; ASCII is ASC; INPUT LINE is LINE INPUT; LET A,B=n;
+  strings may use single quotes; a trailing & continues the line.
+  TIME(2) is connect minutes. TIME(1) is CPU tenths of a second;
+  TIME(3) is kilo-core-ticks. FOR v=x WHILE/UNTIL cond is legal
+  without TO.
 
 
 V7.2-12   20-Aug-2026

@@ -42,13 +42,17 @@ func (p *pkLink) Hangup() {
 }
 
 func (p *pkLink) ctrlWrite(s string) error {
+	s = strings.ReplaceAll(s, "\n", "\r")
+	return p.ctrlWriteBytes([]byte(s))
+}
+
+func (p *pkLink) ctrlWriteBytes(b []byte) error {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	if p.dead {
 		return io.EOF
 	}
-	s = strings.ReplaceAll(s, "\n", "\r")
-	p.toJob.WriteString(s)
+	_, _ = p.toJob.Write(b)
 	p.signal()
 	return nil
 }
@@ -103,20 +107,80 @@ func (p *pkLink) jobWrite(b []byte) (int, error) {
 }
 
 func (p *pkLink) jobReadByte() (byte, error) {
+	return p.takeByte(&p.toJob, -1, true, nil)
+}
+
+func (p *pkLink) jobGetByte(wait time.Duration) (byte, error) {
+	return p.takeByte(&p.toJob, wait, true, nil)
+}
+
+func (p *pkLink) ctrlGetByte(wait time.Duration, interrupted func() bool) (byte, error) {
+	return p.takeByte(&p.toCtrl, wait, false, interrupted)
+}
+
+func (p *pkLink) takeByte(buf *bytes.Buffer, wait time.Duration, fromJob bool, interrupted func() bool) (byte, error) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
-	for p.toJob.Len() == 0 && !p.dead && !p.kicked {
-		p.cv.Wait()
+	if wait < 0 {
+		for {
+			if fromJob && p.kicked {
+				p.kicked = false
+				return 0, errForced
+			}
+			if buf.Len() > 0 {
+				return buf.ReadByte()
+			}
+			if p.dead {
+				return 0, io.EOF
+			}
+			if interrupted != nil && interrupted() {
+				return 0, ErrInterrupt
+			}
+			if fromJob {
+				p.cv.Wait()
+				continue
+			}
+			p.mu.Unlock()
+			timer := time.NewTimer(50 * time.Millisecond)
+			select {
+			case <-timer.C:
+			case <-p.wake:
+			}
+			timer.Stop()
+			p.mu.Lock()
+		}
 	}
-	if p.kicked {
-		p.kicked = false
-		return 0, errForced
+	deadline := time.Now().Add(wait)
+	for {
+		if fromJob && p.kicked {
+			p.kicked = false
+			return 0, errForced
+		}
+		if buf.Len() > 0 {
+			return buf.ReadByte()
+		}
+		if p.dead {
+			return 0, io.EOF
+		}
+		if interrupted != nil && interrupted() {
+			return 0, ErrInterrupt
+		}
+		if wait == 0 || !time.Now().Before(deadline) {
+			return 0, errWaitTimeout
+		}
+		remain := time.Until(deadline)
+		if remain <= 0 {
+			return 0, errWaitTimeout
+		}
+		p.mu.Unlock()
+		timer := time.NewTimer(remain)
+		select {
+		case <-timer.C:
+		case <-p.wake:
+		}
+		timer.Stop()
+		p.mu.Lock()
 	}
-	if p.toJob.Len() == 0 {
-		return 0, io.EOF
-	}
-	b, err := p.toJob.ReadByte()
-	return b, err
 }
 
 func (p *pkLink) kick() {
@@ -155,6 +219,10 @@ func (t *pkTerm) ReadPassword(prompt string) (string, error) {
 }
 
 func (t *pkTerm) InterruptRead() { t.link.kick() }
+
+func (t *pkTerm) GetByte(wait time.Duration) (byte, error) {
+	return t.link.jobGetByte(wait)
+}
 
 func (t *pkTerm) PollInterrupt() bool {
 	return t.link.pollCtrlC()

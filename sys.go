@@ -164,6 +164,13 @@ func fipPayload(arg string) string {
 	return strings.TrimRight(arg[2:], "\x00")
 }
 
+func extraRaw(arg string) string {
+	if len(arg) < 3 {
+		return ""
+	}
+	return arg[2:]
+}
+
 func fipZeros() string {
 	return string(make([]byte, 30))
 }
@@ -335,7 +342,15 @@ func fipCall(arg string, m *Machine) (string, error) {
 		return "", io.Broadcast(to, text)
 	case -17:
 		return fipLookup(io, payload)
+	case -18:
+		if io.FipExtra != nil {
+			return io.FipExtra(-18, extraRaw(arg))
+		}
+		return io.CCLLine, nil
 	default:
+		if io.FipExtra != nil && (sub <= -20 && sub != -21) {
+			return io.FipExtra(sub, extraRaw(arg))
+		}
 		return fipZeros(), nil
 	}
 }

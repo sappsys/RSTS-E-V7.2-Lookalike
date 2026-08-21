@@ -1,0 +1,3 @@
+10 PRINT USING "###.##", 12.5
+20 PRINT USING "!", "HELLO"
+30 END

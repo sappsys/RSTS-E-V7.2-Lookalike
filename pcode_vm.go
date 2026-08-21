@@ -195,7 +195,7 @@ func (vm *pvm) step(op byte) error {
 			return err
 		}
 		return m.assign(&varRef{name: name, indices: idxLits(idxs)}, v)
-	case opAdd, opSub, opMul, opDiv, opIDiv, opMod, opPow, opEq, opNe, opLt, opLe, opGt, opGe, opAnd, opOr:
+	case opAdd, opSub, opMul, opDiv, opIDiv, opMod, opPow, opEq, opNe, opLt, opLe, opGt, opGe, opAnd, opOr, opXor, opEqv, opImp, opApprox:
 		r, err := vm.pop()
 		if err != nil {
 			return err
@@ -219,7 +219,13 @@ func (vm *pvm) step(op byte) error {
 		if err != nil {
 			return err
 		}
-		vm.push(numValue(float64(^int(x))))
+		vm.push(numValue(fromInt16(^int16Bits(x))))
+		return nil
+	case opDup:
+		if len(vm.stack) == 0 {
+			return m.err("Syntax error")
+		}
+		vm.push(vm.stack[len(vm.stack)-1])
 		return nil
 	case opNeg:
 		v, err := vm.pop()
@@ -1186,7 +1192,7 @@ func (vm *pvm) execSleep() error {
 	defer vm.m.noteWait(start)
 	for time.Now().Before(deadline) {
 		if vm.m.Interrupted() {
-			return ErrInterrupt
+			return vm.m.interruptErr()
 		}
 		left := time.Until(deadline)
 		if left > 50*time.Millisecond {
@@ -1240,6 +1246,14 @@ func binOpName(op byte) string {
 		return "AND"
 	case opOr:
 		return "OR"
+	case opXor:
+		return "XOR"
+	case opEqv:
+		return "EQV"
+	case opImp:
+		return "IMP"
+	case opApprox:
+		return "=="
 	}
 	return "+"
 }

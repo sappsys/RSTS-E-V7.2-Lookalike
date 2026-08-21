@@ -101,6 +101,15 @@ func TestDirAllocBriefHeader(t *testing.T) {
 	sh, out := guestShell(t)
 	sh.Dispatch("SAVE HELLO")
 	out.Reset()
+	sh.Dispatch("DIR")
+	got := out.String()
+	if !strings.Contains(got, "HELLO") || !strings.Contains(got, "Size") || !strings.Contains(got, "Prot") {
+		t.Fatalf("dir default: %q", got)
+	}
+	if strings.Contains(got, "Name     .Typ   Clu") {
+		t.Fatalf("dir default used /C layout: %q", got)
+	}
+	out.Reset()
 	sh.Dispatch("DIR/A")
 	if !strings.Contains(out.String(), "HELLO") || !strings.Contains(out.String(), "Alloc") {
 		t.Fatalf("dir/a: %q", out.String())
@@ -117,7 +126,7 @@ func TestDirAllocBriefHeader(t *testing.T) {
 	}
 	out.Reset()
 	sh.Dispatch("DIR/N")
-	got := out.String()
+	got = out.String()
 	if !strings.Contains(got, "HELLO") {
 		t.Fatalf("dir/n: %q", got)
 	}
@@ -270,3 +279,57 @@ func TestFIPDisableLogins(t *testing.T) {
 		t.Fatalf("logins re-enabled: %q", gout.String())
 	}
 }
+
+func TestMyCopyBinary(t *testing.T) {
+	sh, out := guestShell(t)
+	src := samples["100,100"]["MYCOPY.BAS"]
+	if src == "" {
+		t.Fatal("missing sample MYCOPY.BAS")
+	}
+	if err := NewMachine(IO{}).LoadSource(src, "MYCOPY"); err != nil {
+		t.Fatalf("MYCOPY.BAS: %v", err)
+	}
+
+	raw := "A\x00B\xff\r\nC" + strings.Repeat("X", 512)
+	spec, err := ParseFileSpec("BIN.DAT", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := sh.Disk.WriteText(spec, 100, 100, false, raw, defaultProt); err != nil {
+		t.Fatal(err)
+	}
+
+	copyOnce := func(tail string) {
+		t.Helper()
+		sh.cclArg = tail
+		sh.Basic.IO.CCLLine = tail
+		out.Reset()
+		sh.Dispatch("RUN MYCOPY")
+		got := out.String()
+		if strings.Contains(got, "?") {
+			t.Fatalf("MYCOPY %s: %q", tail, got)
+		}
+		if !strings.Contains(got, "bytes copied") {
+			t.Fatalf("MYCOPY %s no count: %q", tail, got)
+		}
+	}
+
+	copyOnce("BIN.DAT BIN.CPY")
+	got, err := sh.Disk.ReadText(mustSpec(t, "BIN.CPY"), 100, 100, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got != raw {
+		t.Fatalf("binary copy len %d want %d", len(got), len(raw))
+	}
+
+	copyOnce("BIN.BAK=BIN.DAT")
+	got, err = sh.Disk.ReadText(mustSpec(t, "BIN.BAK"), 100, 100, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got != raw {
+		t.Fatalf("dst=src copy len %d want %d", len(got), len(raw))
+	}
+}
+

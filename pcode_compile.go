@@ -13,13 +13,18 @@ const (
 	loopFor loopKind = iota
 	loopWhile
 	loopUntil
+	loopForCond
 )
 
 type compileLoop struct {
-	kind    loopKind
-	name    string
-	beginIP int
-	failAt  int
+	kind     loopKind
+	name     string
+	beginIP  int
+	failAt   int
+	testJump int
+	step     expr
+	cond     expr
+	until    bool
 }
 
 type pendingFn struct {
@@ -172,6 +177,61 @@ func (c *compiler) emitJump(op byte) int {
 	return c.holeU32()
 }
 
+func (c *compiler) forCond(s stmt) error {
+	if err := c.expr(s.start); err != nil {
+		return err
+	}
+	if err := c.store(&varRef{name: s.forVar}); err != nil {
+		return err
+	}
+	testJump := c.emitJump(opJump)
+	body := len(c.img.Code)
+	c.loops = append(c.loops, compileLoop{
+		kind:     loopForCond,
+		name:     s.forVar,
+		beginIP:  body,
+		testJump: testJump,
+		step:     s.step,
+		cond:     s.cond,
+		until:    s.forCond == "UNTIL",
+	})
+	return nil
+}
+
+func (c *compiler) forCondFinish(loop compileLoop) error {
+	if err := c.emitLoadAddStore(loop.name, loop.step); err != nil {
+		return err
+	}
+	c.patchU32(loop.testJump, uint32(len(c.img.Code)))
+	if err := c.expr(loop.cond); err != nil {
+		return err
+	}
+	var done int
+	if loop.until {
+		done = c.emitJump(opJumpTrue)
+	} else {
+		done = c.emitJump(opJumpFalse)
+	}
+	c.emit(opJump)
+	c.emitU32(uint32(loop.beginIP))
+	c.patchU32(done, uint32(len(c.img.Code)))
+	return nil
+}
+
+func (c *compiler) emitLoadAddStore(name string, step expr) error {
+	c.emit(opLoadVar)
+	c.emitU16(c.intern(name))
+	if step != nil {
+		if err := c.expr(step); err != nil {
+			return err
+		}
+	} else {
+		c.emit(opPush1)
+	}
+	c.emit(opAdd)
+	return c.store(&varRef{name: name})
+}
+
 func (c *compiler) stmt(s stmt) error {
 	if len(s.mods) > 0 {
 		return c.mods(s, len(s.mods)-1)
@@ -232,6 +292,36 @@ func (c *compiler) mods(s stmt, mi int) error {
 		c.patchU32(done, uint32(len(c.img.Code)))
 		return nil
 	case "FOR":
+		if mod.forCond != "" {
+			if err := c.expr(mod.start); err != nil {
+				return err
+			}
+			if err := c.store(&varRef{name: mod.forVar}); err != nil {
+				return err
+			}
+			testJump := c.emitJump(opJump)
+			body := len(c.img.Code)
+			if err := c.mods(s, mi-1); err != nil {
+				return err
+			}
+			if err := c.emitLoadAddStore(mod.forVar, mod.step); err != nil {
+				return err
+			}
+			c.patchU32(testJump, uint32(len(c.img.Code)))
+			if err := c.expr(mod.cond); err != nil {
+				return err
+			}
+			var done int
+			if mod.forCond == "UNTIL" {
+				done = c.emitJump(opJumpTrue)
+			} else {
+				done = c.emitJump(opJumpFalse)
+			}
+			c.emit(opJump)
+			c.emitU32(uint32(body))
+			c.patchU32(done, uint32(len(c.img.Code)))
+			return nil
+		}
 		if err := c.expr(mod.start); err != nil {
 			return err
 		}
@@ -277,7 +367,18 @@ func (c *compiler) core(s stmt) error {
 		if err := c.expr(s.expr); err != nil {
 			return err
 		}
-		return c.store(s.target)
+		for range s.targets {
+			c.emit(opDup)
+		}
+		if err := c.store(s.target); err != nil {
+			return err
+		}
+		for _, t := range s.targets {
+			if err := c.store(t); err != nil {
+				return err
+			}
+		}
+		return nil
 	case stPrint:
 		return c.print(s)
 	case stInput:
@@ -316,6 +417,9 @@ func (c *compiler) core(s stmt) error {
 	case stIf:
 		return c.ifStmt(s)
 	case stFor:
+		if s.forCond != "" {
+			return c.forCond(s)
+		}
 		if err := c.expr(s.start); err != nil {
 			return err
 		}
@@ -727,7 +831,10 @@ func (c *compiler) next(name string) error {
 			if top.kind == loopFor && top.name == name {
 				break
 			}
-			if len(c.loops) == 0 && (top.kind != loopFor || top.name != name) {
+			if top.kind == loopForCond && top.name == name {
+				break
+			}
+			if len(c.loops) == 0 && !((top.kind == loopFor || top.kind == loopForCond) && top.name == name) {
 				return basicErr("NEXT without FOR")
 			}
 		}
@@ -756,6 +863,8 @@ func (c *compiler) closeLoop(loop compileLoop, nextName string) {
 			c.emitU16(pcodeNoName)
 		}
 		c.patchU32(loop.failAt, uint32(len(c.img.Code)))
+	case loopForCond:
+		_ = c.forCondFinish(loop)
 	case loopWhile, loopUntil:
 		c.emit(opJump)
 		c.emitU32(uint32(loop.beginIP))
@@ -1174,6 +1283,14 @@ func binOpCode(op string) (byte, bool) {
 		return opAnd, true
 	case "OR":
 		return opOr, true
+	case "XOR":
+		return opXor, true
+	case "EQV":
+		return opEqv, true
+	case "IMP":
+		return opImp, true
+	case "==":
+		return opApprox, true
 	}
 	return 0, false
 }
